@@ -10,7 +10,7 @@ inputs:
     required: false
     default: "deploy"
   target:
-    description: "Target: app name, organisation, platform, or account (app name for build)"
+    description: "An application name, or a tier: organisation, platform, or account. App targets run the app's deploy/destroy/build; tier targets run the noun-verb tier command (fjall org|platform|account deploy|destroy). Build is application-only."
     required: true
   service:
     description: "Specific service name (deploy and build only)"
@@ -22,6 +22,10 @@ inputs:
     default: "full"
   environment:
     description: "Target environment (maps to the -e flag; deploy only)"
+    required: false
+    default: ""
+  deploy-target:
+    description: "Deploy to a specific fjall target (a `fjall target list` name, e.g. production-use1) — maps to --target: the precise credential where, vs environment's stage selector. App targets only (deploy, destroy, build)"
     required: false
     default: ""
   verbose:
@@ -37,7 +41,7 @@ inputs:
     required: false
     default: "false"
   no-cascade:
-    description: "Skip automatic platform/account cascade around organisation deploys and destroys"
+    description: "Skip the automatic platform/account cascade after an organisation deploy or before an organisation destroy (target: organisation only)"
     required: false
     default: "false"
   region:
@@ -77,9 +81,9 @@ inputs:
     required: false
     default: "false"
   cli-version:
-    description: "Pin the published fjall CLI version (default: latest)"
+    description: "Pin the published fjall CLI version, `latest`, or `auto` (derive the engine major from the app's pinned @fjall/components-infrastructure, so the engine never skews across a major from the constructs it synthesises). Default: the plugin's compatible CLI major"
     required: false
-    default: "latest"
+    default: "4"
   working-directory:
     description: "Directory containing fjall-config.json"
     required: false
@@ -108,9 +112,20 @@ runs:
       shell: bash
       env:
         CLI_VERSION: ${{ inputs.cli-version }}
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
       run: |
         if [ "${CLI_VERSION}" = "latest" ]; then
           npm install -g fjall
+        elif [ "${CLI_VERSION}" = "auto" ]; then
+          # Match the engine major to the app's pinned @fjall/components-infrastructure
+          # so the deploy engine never skews across a major from the constructs it
+          # synthesises (engine-version contract). github.action_path is GitHub-controlled;
+          # WORKING_DIRECTORY reaches the script via argv, never interpolated into the shell.
+          if ! RESOLVED_ENGINE_SPEC="$(node "${{ github.action_path }}/resolve-fjall-engine.mjs" "${WORKING_DIRECTORY}")"; then
+            echo "Failed to resolve the fjall engine from the app's @fjall/components-infrastructure pin" >&2
+            exit 1
+          fi
+          npm install -g "${RESOLVED_ENGINE_SPEC}"
         else
           npm install -g "fjall@${CLI_VERSION}"
         fi
@@ -126,6 +141,7 @@ runs:
         INPUT_SERVICE: ${{ inputs.service }}
         INPUT_MODE: ${{ inputs.mode }}
         INPUT_ENVIRONMENT: ${{ inputs.environment }}
+        INPUT_DEPLOY_TARGET: ${{ inputs.deploy-target }}
         INPUT_VERBOSE: ${{ inputs.verbose }}
         INPUT_SKIP_BUILD: ${{ inputs.skip-build }}
         INPUT_SKIP_MIGRATIONS: ${{ inputs.skip-migrations }}
@@ -140,52 +156,116 @@ runs:
         INPUT_BUILD_SECRETS: ${{ inputs.build-secrets }}
         INPUT_FORCE: ${{ inputs.force }}
       run: |
-        case "${INPUT_COMMAND}" in
-          deploy|destroy|build) ;;
-          *)
-            echo "Error: unsupported command '${INPUT_COMMAND}' (expected deploy, destroy, or build)" >&2
-            exit 1
-            ;;
-        esac
-
-        # Mode only applies to deploy — reject a non-default mode elsewhere
-        if [ "${INPUT_COMMAND}" != "deploy" ] && [ "${INPUT_MODE}" != "full" ]; then
-          echo "Error: 'mode' is only supported for deploy (got mode '${INPUT_MODE}' with command '${INPUT_COMMAND}')" >&2
-          exit 1
-        fi
-
-        # Build the argv as an array — user-supplied values stay single words
-        ARGS=("${INPUT_COMMAND}" "${INPUT_TARGET}")
-
-        if [ -n "${INPUT_SERVICE}" ]; then
-          if [ "${INPUT_COMMAND}" = "destroy" ]; then
-            echo "Error: 'service' is not supported for destroy" >&2
-            exit 1
-          fi
-          ARGS+=("${INPUT_SERVICE}")
-        fi
-
-        # Always non-interactive in CI
-        ARGS+=(--non-interactive)
-
-        # Skip confirmation for deploy/destroy (not applicable to build)
-        if [ "${INPUT_COMMAND}" = "deploy" ] || [ "${INPUT_COMMAND}" = "destroy" ]; then
-          ARGS+=(--skip-confirmation)
-        fi
-
-        if [ "${INPUT_COMMAND}" = "deploy" ]; then
-          case "${INPUT_MODE}" in
-            full) ;;
-            infra-only) ARGS+=(--infra-only) ;;
-            deploy-only) ARGS+=(--deploy-only) ;;
-            *)
-              echo "Error: unsupported mode '${INPUT_MODE}' (expected full, infra-only, or deploy-only)" >&2
+        # Reject flag-shaped property values before they reach fjall. Inputs are
+        # interpolated from workflow YAML / GitHub context; a value beginning
+        # with '-' would be parsed by commander as a flag rather than a value,
+        # even though each is passed as a quoted argv element. Fail fast. Keep in
+        # lockstep with the Buildkite plugin's hooks/command.
+        reject_leading_dash() {
+          case "$2" in
+            -*)
+              echo "Error: '$1' must not begin with '-' (got '$2')." >&2
               exit 1
               ;;
           esac
+        }
+        reject_leading_dash command "${INPUT_COMMAND}"
+        reject_leading_dash target "${INPUT_TARGET}"
+        reject_leading_dash service "${INPUT_SERVICE}"
+        reject_leading_dash mode "${INPUT_MODE}"
+        reject_leading_dash environment "${INPUT_ENVIRONMENT}"
+        reject_leading_dash deploy-target "${INPUT_DEPLOY_TARGET}"
+        reject_leading_dash region "${INPUT_REGION}"
+        reject_leading_dash image-tag "${INPUT_IMAGE_TAG}"
+        reject_leading_dash approval-token "${INPUT_APPROVAL_TOKEN}"
+
+        # Classify the target. The app-only `ci run <cmd> <target>` shim rejects
+        # the tier words (T3: tier deploys and destroys are noun-verb), so an
+        # organisation/platform/account target routes to `fjall <noun> <cmd>`
+        # while an app target keeps the ci run shim. Values are passed as quoted
+        # array elements throughout so user input can never inject arguments.
+        # Keep this branching in lockstep with the Buildkite plugin's
+        # hooks/command.
+        case "${INPUT_TARGET}" in
+          organisation) TIER_NOUN="org" ;;
+          platform) TIER_NOUN="platform" ;;
+          account) TIER_NOUN="account" ;;
+          *) TIER_NOUN="" ;;
+        esac
+
+        if [ -n "${TIER_NOUN}" ]; then
+          # Tier path. The tier leaves honour only --force, --verbose and
+          # (organisation) --no-cascade — every app/deploy-only/approval-gate
+          # input is rejected here rather than silently dropped, so a
+          # `plan: true` can never become an unpreviewed tier mutation.
+          if [ "${INPUT_COMMAND}" != "deploy" ] && [ "${INPUT_COMMAND}" != "destroy" ]; then
+            echo "Error: command '${INPUT_COMMAND}' is application-only; tier target '${INPUT_TARGET}' supports deploy and destroy only." >&2
+            exit 1
+          fi
+
+          INCOMPATIBLE=()
+          if [ -n "${INPUT_SERVICE}" ]; then INCOMPATIBLE+=("service"); fi
+          if [ -n "${INPUT_MODE}" ] && [ "${INPUT_MODE}" != "full" ]; then INCOMPATIBLE+=("mode"); fi
+          if [ -n "${INPUT_ENVIRONMENT}" ]; then INCOMPATIBLE+=("environment"); fi
+          if [ -n "${INPUT_DEPLOY_TARGET}" ]; then INCOMPATIBLE+=("deploy-target"); fi
+          if [ "${INPUT_SKIP_BUILD}" = "true" ]; then INCOMPATIBLE+=("skip-build"); fi
+          if [ "${INPUT_SKIP_MIGRATIONS}" = "true" ]; then INCOMPATIBLE+=("skip-migrations"); fi
+          if [ -n "${INPUT_REGION}" ]; then INCOMPATIBLE+=("region"); fi
+          if [ -n "${INPUT_IMAGE_TAG}" ]; then INCOMPATIBLE+=("image-tag"); fi
+          if [ "${INPUT_PLAN}" = "true" ]; then INCOMPATIBLE+=("plan"); fi
+          if [ "${INPUT_REQUIRE_APPROVAL}" = "true" ]; then INCOMPATIBLE+=("require-approval"); fi
+          if [ "${INPUT_AUTO_APPROVE}" = "true" ]; then INCOMPATIBLE+=("auto-approve"); fi
+          if [ -n "${INPUT_APPROVAL_TOKEN}" ]; then INCOMPATIBLE+=("approval-token"); fi
+          if [ -n "${INPUT_BUILD_ARGS}" ]; then INCOMPATIBLE+=("build-args"); fi
+          if [ -n "${INPUT_BUILD_SECRETS}" ]; then INCOMPATIBLE+=("build-secrets"); fi
+          if [ "${#INCOMPATIBLE[@]}" -gt 0 ]; then
+            echo "Error: these inputs are not valid with tier target '${INPUT_TARGET}': ${INCOMPATIBLE[*]}. Tier ${INPUT_COMMAND}s accept only force, verbose, and no-cascade (organisation only)." >&2
+            exit 1
+          fi
+
+          if [ "${INPUT_NO_CASCADE}" = "true" ] && [ "${INPUT_TARGET}" != "organisation" ]; then
+            echo "Error: no-cascade is only valid with target: organisation; the platform and account tiers have no cascade." >&2
+            exit 1
+          fi
+
+          ARGS=("${TIER_NOUN}" "${INPUT_COMMAND}" --non-interactive)
+          if [ "${INPUT_FORCE}" = "true" ]; then
+            ARGS+=(--force)
+          fi
+          if [ "${INPUT_VERBOSE}" = "true" ]; then
+            ARGS+=(--verbose)
+          fi
+          if [ "${INPUT_NO_CASCADE}" = "true" ]; then
+            ARGS+=(--no-cascade)
+          fi
+        else
+          # App path — thin shim onto `fjall ci run`; the CLI owns argv assembly
+          # and command/flag validation (unknown commands, deploy-only flags on
+          # destroy/build, mode vocabulary). --no-cascade is an organisation-tier
+          # concept the ci run surface no longer accepts.
+          if [ "${INPUT_NO_CASCADE}" = "true" ]; then
+            echo "Error: no-cascade is only valid with target: organisation; application '${INPUT_TARGET}' has no cascade." >&2
+            exit 1
+          fi
+
+          ARGS=(ci run "${INPUT_COMMAND}" "${INPUT_TARGET}")
+
+          if [ -n "${INPUT_SERVICE}" ]; then
+            ARGS+=(--service "${INPUT_SERVICE}")
+          fi
+
+          ARGS+=(--non-interactive)
+
+          if [ -n "${INPUT_MODE}" ] && [ "${INPUT_MODE}" != "full" ]; then
+            ARGS+=(--mode "${INPUT_MODE}")
+          fi
 
           if [ -n "${INPUT_ENVIRONMENT}" ]; then
-            ARGS+=(-e "${INPUT_ENVIRONMENT}")
+            ARGS+=(--environment "${INPUT_ENVIRONMENT}")
+          fi
+
+          if [ -n "${INPUT_DEPLOY_TARGET}" ]; then
+            ARGS+=(--target "${INPUT_DEPLOY_TARGET}")
           fi
 
           if [ "${INPUT_SKIP_BUILD}" = "true" ]; then
@@ -219,12 +299,11 @@ runs:
           if [ -n "${INPUT_APPROVAL_TOKEN}" ]; then
             ARGS+=(--approval-token "${INPUT_APPROVAL_TOKEN}")
           fi
-        fi
 
-        if [ "${INPUT_COMMAND}" = "deploy" ] || [ "${INPUT_COMMAND}" = "build" ]; then
           if [ -n "${INPUT_BUILD_ARGS}" ]; then
             while IFS= read -r build_arg; do
               if [ -n "${build_arg}" ]; then
+                reject_leading_dash build-args "${build_arg}"
                 ARGS+=(--build-arg "${build_arg}")
               fi
             done <<< "${INPUT_BUILD_ARGS}"
@@ -233,26 +312,19 @@ runs:
           if [ -n "${INPUT_BUILD_SECRETS}" ]; then
             while IFS= read -r build_secret; do
               if [ -n "${build_secret}" ]; then
+                reject_leading_dash build-secrets "${build_secret}"
                 ARGS+=(--build-secret "${build_secret}")
               fi
             done <<< "${INPUT_BUILD_SECRETS}"
           fi
-        fi
 
-        if [ "${INPUT_NO_CASCADE}" = "true" ]; then
-          if [ "${INPUT_COMMAND}" = "deploy" ] || [ "${INPUT_COMMAND}" = "destroy" ]; then
-            ARGS+=(--no-cascade)
-          fi
-        fi
-
-        if [ "${INPUT_FORCE}" = "true" ]; then
-          if [ "${INPUT_COMMAND}" = "deploy" ] || [ "${INPUT_COMMAND}" = "destroy" ]; then
+          if [ "${INPUT_FORCE}" = "true" ]; then
             ARGS+=(--force)
           fi
-        fi
 
-        if [ "${INPUT_VERBOSE}" = "true" ]; then
-          ARGS+=(--verbose)
+          if [ "${INPUT_VERBOSE}" = "true" ]; then
+            ARGS+=(--verbose)
+          fi
         fi
 
         # Run with timing; tee output so the approval token can be captured

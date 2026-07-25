@@ -2,7 +2,9 @@
 
 A GitHub Action to deploy, destroy, or build [Fjall](https://fjall.io) applications on AWS.
 
-This is a thin wrapper around the `fjall` CLI — it installs the CLI and runs it with the right flags for CI/CD.
+This is a thin shim onto `fjall ci run` — it installs the CLI and delegates. The CLI owns command and flag validation, so an invalid combination (for example `mode` with `command: destroy`) fails with a directional error from `fjall` rather than being silently dropped.
+
+A tier `target` (`organisation`, `platform`, or `account`) routes to the noun-verb tier command — `fjall org deploy`, `fjall platform destroy`, and so on — and accepts only the flags that tier honours (`force`, `verbose`, and, for `organisation`, `no-cascade`). Any app or deploy-only property paired with a tier target is rejected at the plugin boundary rather than silently dropped.
 
 ## Quick Start
 
@@ -96,28 +98,29 @@ The `FJALL_API_KEY` environment variable takes precedence over any credentials s
 
 ## Inputs
 
-| Input               | Required | Default  | Applies to      | Description                                                                                          |
-| ------------------- | -------- | -------- | --------------- | ---------------------------------------------------------------------------------------------------- |
-| `command`           | no       | `deploy` | —               | `deploy`, `destroy`, or `build`                                                                      |
-| `target`            | **yes**  | —        | all             | App name, `organisation`, `platform`, or `account` (app name for `build`)                            |
-| `service`           | no       | —        | deploy, build   | Specific service name                                                                                |
-| `mode`              | no       | `full`   | deploy          | `full`, `infra-only`, or `deploy-only`                                                               |
-| `environment`       | no       | —        | deploy          | Target environment (maps to the `-e` flag)                                                           |
-| `verbose`           | no       | `false`  | all             | Enable verbose output                                                                                |
-| `skip-build`        | no       | `false`  | deploy          | Skip Docker build (use with `mode: deploy-only` when the image is already pushed)                    |
-| `skip-migrations`   | no       | `false`  | deploy          | Skip database migrations during this deployment                                                      |
-| `no-cascade`        | no       | `false`  | deploy, destroy | Skip automatic platform/account cascade around organisation deploys and destroys                     |
-| `region`            | no       | —        | deploy          | Deploy to a specific region within the target's account                                              |
-| `image-tag`         | no       | —        | deploy          | Roll forward/back to an existing image tag (skips build, implies `deploy-only`)                      |
-| `plan`              | no       | `false`  | deploy          | Compute and print the change plan, then stop before any mutation                                     |
-| `require-approval`  | no       | `false`  | deploy          | Engage the approval gate: refuse to mutate unless approved via `auto-approve` or `approval-token`    |
-| `auto-approve`      | no       | `false`  | deploy          | Approve the computed plan without prompting (use with `require-approval`)                            |
-| `approval-token`    | no       | —        | deploy          | Resume an approved plan from a prior `plan` run (digest re-verified before applying)                 |
-| `build-args`        | no       | —        | deploy, build   | Newline-separated `KEY=VALUE` pairs, each passed via `--build-arg`                                   |
-| `build-secrets`     | no       | —        | deploy, build   | Newline-separated `id=ID,ssm=PATH` (or `secretsManager=NAME` \| `env=VAR`) tokens (`--build-secret`) |
-| `force`             | no       | `false`  | deploy, destroy | Deploy: redeploy all stacks even when unchanged. Destroy: skip destruction confirmation              |
-| `cli-version`       | no       | `latest` | —               | Pin the published `fjall` CLI version                                                                |
-| `working-directory` | no       | `.`      | —               | Directory containing `fjall-config.json`                                                             |
+| Input               | Required | Default  | Applies to         | Description                                                                                                                                                                                                         |
+| ------------------- | -------- | -------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `command`           | no       | `deploy` | —                  | `deploy`, `destroy`, or `build`                                                                                                                                                                                     |
+| `target`            | **yes**  | —        | all                | Application name, or a tier: `organisation`, `platform`, `account`. App targets run the app; tier targets route to the noun-verb tier command (`fjall org\|platform\|account deploy\|destroy`). `build` is app-only |
+| `service`           | no       | —        | deploy, build      | Specific service name                                                                                                                                                                                               |
+| `mode`              | no       | `full`   | deploy             | `full`, `infra-only`, or `deploy-only`                                                                                                                                                                              |
+| `environment`       | no       | —        | deploy             | Target environment (maps to the `-e` flag)                                                                                                                                                                          |
+| `deploy-target`     | no       | —        | app targets        | Deploy to a specific `fjall target list` target, e.g. `production-use1`; maps to `--target` (the credential where), distinct from `environment`                                                                     |
+| `verbose`           | no       | `false`  | all                | Enable verbose output                                                                                                                                                                                               |
+| `skip-build`        | no       | `false`  | deploy             | Skip Docker build (use with `mode: deploy-only` when the image is already pushed)                                                                                                                                   |
+| `skip-migrations`   | no       | `false`  | deploy             | Skip database migrations during this deployment                                                                                                                                                                     |
+| `no-cascade`        | no       | `false`  | org deploy/destroy | Skip the platform/account cascade around an `organisation` deploy or destroy (rejected for any other target)                                                                                                        |
+| `region`            | no       | —        | deploy             | Deploy to a specific region within the target's account                                                                                                                                                             |
+| `image-tag`         | no       | —        | deploy             | Roll forward/back to an existing image tag (skips build, implies `deploy-only`)                                                                                                                                     |
+| `plan`              | no       | `false`  | deploy             | Compute and print the change plan, then stop before any mutation                                                                                                                                                    |
+| `require-approval`  | no       | `false`  | deploy             | Engage the approval gate: refuse to mutate unless approved via `auto-approve` or `approval-token`                                                                                                                   |
+| `auto-approve`      | no       | `false`  | deploy             | Approve the computed plan without prompting (use with `require-approval`)                                                                                                                                           |
+| `approval-token`    | no       | —        | deploy             | Resume an approved plan from a prior `plan` run (digest re-verified before applying)                                                                                                                                |
+| `build-args`        | no       | —        | deploy, build      | Newline-separated `KEY=VALUE` pairs, each passed via `--build-arg`                                                                                                                                                  |
+| `build-secrets`     | no       | —        | deploy, build      | Newline-separated `id=ID,ssm=PATH` (or `secretsManager=NAME` \| `env=VAR`) tokens (`--build-secret`)                                                                                                                |
+| `force`             | no       | `false`  | deploy, destroy    | Deploy: redeploy all stacks even when unchanged. Destroy: skip destruction confirmation                                                                                                                             |
+| `cli-version`       | no       | `4`      | —                  | Pin the published `fjall` CLI version. Defaults to this action's compatible major (floats across `4`.x, never crossing into the next major); set `latest` to always install the newest published release            |
+| `working-directory` | no       | `.`      | —                  | Directory containing `fjall-config.json`                                                                                                                                                                            |
 
 ## Outputs
 
@@ -231,15 +234,6 @@ Or approve in one shot in trusted pipelines:
       id=npm-token,ssm=/ci/npm-token
 ```
 
-### Organisation Deploy
-
-```yaml
-- uses: fjall-tech/fjall-deploy-action@v1
-  with:
-    target: organisation
-    verbose: true
-```
-
 ### Destroy with Force
 
 ```yaml
@@ -258,6 +252,17 @@ Or approve in one shot in trusted pipelines:
     target: my-app
     service: api
     mode: deploy-only
+```
+
+### Deploy a Tier
+
+A tier `target` routes to the noun-verb tier command. This runs `fjall org deploy --non-interactive --no-cascade` (the organisation root stack without its platform/account cascade):
+
+```yaml
+- uses: fjall-tech/fjall-deploy-action@v1
+  with:
+    target: organisation
+    no-cascade: true
 ```
 
 ### Pin CLI Version
