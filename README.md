@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: fjall-tech/fjall-deploy-action@v1
+      - uses: fjall-tech/fjall-deploy-action@v2
         with:
           target: my-app
         env:
@@ -38,7 +38,7 @@ AWS credentials must be configured **before** this action runs. The action does 
 Pass credentials as environment variables from GitHub Secrets:
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v1
+- uses: fjall-tech/fjall-deploy-action@v2
   with:
     target: my-app
   env:
@@ -67,7 +67,7 @@ jobs:
           role-to-assume: arn:aws:iam::123456789012:role/deploy
           aws-region: us-east-2
 
-      - uses: fjall-tech/fjall-deploy-action@v1
+      - uses: fjall-tech/fjall-deploy-action@v2
         with:
           target: my-app
 ```
@@ -87,7 +87,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: fjall-tech/fjall-deploy-action@v1
+      - uses: fjall-tech/fjall-deploy-action@v2
         with:
           target: my-app
         env:
@@ -147,7 +147,7 @@ The action propagates exit code 2, so a `plan` step with pending changes fails t
 Deploys infrastructure and application code:
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v1
+- uses: fjall-tech/fjall-deploy-action@v2
   with:
     target: my-app
 ```
@@ -157,7 +157,7 @@ Deploys infrastructure and application code:
 Deploy infrastructure changes without rebuilding/deploying the application:
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v1
+- uses: fjall-tech/fjall-deploy-action@v2
   with:
     target: my-app
     mode: infra-only
@@ -168,7 +168,7 @@ Deploy infrastructure changes without rebuilding/deploying the application:
 Deploy application code using existing infrastructure (faster for code-only changes):
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v1
+- uses: fjall-tech/fjall-deploy-action@v2
   with:
     target: my-app
     mode: deploy-only
@@ -181,7 +181,7 @@ Deploy application code using existing infrastructure (faster for code-only chan
 Compute the change plan on pull requests without mutating anything:
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v1
+- uses: fjall-tech/fjall-deploy-action@v2
   id: plan
   continue-on-error: true
   with:
@@ -196,7 +196,7 @@ Compute the change plan on pull requests without mutating anything:
 Then apply the approved plan (the token is digest-bound — the apply re-verifies that the plan has not drifted):
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v1
+- uses: fjall-tech/fjall-deploy-action@v2
   with:
     target: my-app
     approval-token: ${{ steps.plan.outputs.approval-token }}
@@ -205,7 +205,7 @@ Then apply the approved plan (the token is digest-bound — the apply re-verifie
 Or approve in one shot in trusted pipelines:
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v1
+- uses: fjall-tech/fjall-deploy-action@v2
   with:
     target: my-app
     require-approval: true
@@ -215,7 +215,7 @@ Or approve in one shot in trusted pipelines:
 ### Roll Back to a Previous Image
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v1
+- uses: fjall-tech/fjall-deploy-action@v2
   with:
     target: my-app
     image-tag: "sha-4f9c2ab"
@@ -224,7 +224,7 @@ Or approve in one shot in trusted pipelines:
 ### Build-Time Args and Secrets
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v1
+- uses: fjall-tech/fjall-deploy-action@v2
   with:
     target: my-app
     build-args: |
@@ -237,7 +237,7 @@ Or approve in one shot in trusted pipelines:
 ### Destroy with Force
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v1
+- uses: fjall-tech/fjall-deploy-action@v2
   with:
     command: destroy
     target: my-app
@@ -247,7 +247,7 @@ Or approve in one shot in trusted pipelines:
 ### Deploy Specific Service
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v1
+- uses: fjall-tech/fjall-deploy-action@v2
   with:
     target: my-app
     service: api
@@ -259,7 +259,7 @@ Or approve in one shot in trusted pipelines:
 A tier `target` routes to the noun-verb tier command. This runs `fjall org deploy --non-interactive --no-cascade` (the organisation root stack without its platform/account cascade):
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v1
+- uses: fjall-tech/fjall-deploy-action@v2
   with:
     target: organisation
     no-cascade: true
@@ -268,7 +268,7 @@ A tier `target` routes to the noun-verb tier command. This runs `fjall org deplo
 ### Pin CLI Version
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v1
+- uses: fjall-tech/fjall-deploy-action@v2
   with:
     target: my-app
     cli-version: "2.23.1"
@@ -286,7 +286,7 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::123456789012:role/deploy
           aws-region: us-east-2
-      - uses: fjall-tech/fjall-deploy-action@v1
+      - uses: fjall-tech/fjall-deploy-action@v2
         with:
           target: my-app
           mode: infra-only
@@ -300,7 +300,7 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::123456789012:role/deploy
           aws-region: us-east-2
-      - uses: fjall-tech/fjall-deploy-action@v1
+      - uses: fjall-tech/fjall-deploy-action@v2
         with:
           target: my-app
           mode: deploy-only
@@ -324,7 +324,7 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: us-east-2
-      - uses: fjall-tech/fjall-deploy-action@v1
+      - uses: fjall-tech/fjall-deploy-action@v2
         with:
           target: my-app
           environment: staging
@@ -339,7 +339,7 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: us-east-2
-      - uses: fjall-tech/fjall-deploy-action@v1
+      - uses: fjall-tech/fjall-deploy-action@v2
         with:
           target: my-app
           environment: production
