@@ -24,6 +24,7 @@ jobs:
         with:
           target: my-app
         env:
+          FJALL_API_KEY: ${{ secrets.FJALL_API_KEY }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_REGION: us-east-2
@@ -31,9 +32,19 @@ jobs:
 
 ## Authentication
 
+Two credentials are involved: a Fjall deploy token (`FJALL_API_KEY`) and AWS credentials.
+
+### Fjall API Key
+
+The CLI authenticates to Fjall via `FJALL_API_KEY` — an app-scoped `fjall_dk_` deploy token used to record the deployment, hold the app's deploy slot, and read organisation config. Deploy tokens are minted from a signed-in browser session by an owner or admin (**Settings → CI/CD Tokens** in the [Fjall dashboard](https://fjall.io)); CLI mint paths are refused by design, so `fjall ci token create` can only direct you there. Tokens expire after at most 90 days — re-mint from the same page and update the secret to rotate.
+
+Store the token as a repository secret named `FJALL_API_KEY` (`gh secret set FJALL_API_KEY`) and pass it in the step's `env:` block as in the Quick Start. It takes precedence over any credentials stored on the runner (`~/.fjall/auth.json`).
+
+### AWS Credentials
+
 AWS credentials must be configured **before** this action runs. The action does not manage credentials.
 
-### Option 1: IAM Credentials
+#### Option 1: IAM Credentials
 
 Pass credentials as environment variables from GitHub Secrets:
 
@@ -47,7 +58,7 @@ Pass credentials as environment variables from GitHub Secrets:
     AWS_REGION: us-east-2
 ```
 
-### Option 2: AWS OIDC (Recommended)
+#### Option 2: AWS OIDC (Recommended)
 
 Use GitHub's OIDC provider with `aws-actions/configure-aws-credentials` for keyless authentication:
 
@@ -72,9 +83,9 @@ jobs:
           target: my-app
 ```
 
-### Option 3: Fjall OIDC
+#### Option 3: Fjall OIDC
 
-If your app is registered with Fjall, the CLI auto-detects GitHub's OIDC tokens via the `ACTIONS_ID_TOKEN_REQUEST_URL` environment variable. Just grant `id-token: write` permission and set your API key:
+If your app is registered with Fjall, the CLI auto-detects GitHub's OIDC tokens via the `ACTIONS_ID_TOKEN_REQUEST_URL` environment variable. Just grant `id-token: write` permission and set your API key ([Fjall API Key](#fjall-api-key) above):
 
 ```yaml
 permissions:
@@ -93,8 +104,6 @@ jobs:
         env:
           FJALL_API_KEY: ${{ secrets.FJALL_API_KEY }}
 ```
-
-The `FJALL_API_KEY` environment variable takes precedence over any credentials stored on the runner (`~/.fjall/auth.json`).
 
 ## Inputs
 
@@ -139,6 +148,26 @@ The `FJALL_API_KEY` environment variable takes precedence over any credentials s
 | `2`  | Plan computed with changes pending approval, or refused at the approval gate — no mutation |
 
 The action propagates exit code 2, so a `plan` step with pending changes fails the job unless you set `continue-on-error: true` and branch on the `result` output.
+
+## Verifying a Deploy
+
+The `result` output answers "did the step succeed". To confirm what actually shipped, the CLI's read commands work anywhere the same `FJALL_API_KEY` is available (including a follow-up step):
+
+- `fjall deployments list` — your organisation's active and recent deployments: who triggered each, from where, and its current state
+- `fjall releases <app>` — the app's recorded releases with their image tags: what is live now, and what a rollback can target
+- `fjall status <app>` — the deployed infrastructure's current health
+
+## Serialising Deploys
+
+Fjall allows one active deployment per app (the deploy slot). Give every workflow that deploys the same app a shared concurrency group — the same shape `fjall ci setup` scaffolds — so overlapping runs queue instead of contending for the slot:
+
+```yaml
+concurrency:
+  group: fjall-deploy-my-app
+  cancel-in-progress: false
+```
+
+Keep `cancel-in-progress: false`: cancelling a deploy mid-run can interrupt an in-flight CloudFormation update.
 
 ## Deploy Modes
 
@@ -221,6 +250,8 @@ Or approve in one shot in trusted pipelines:
     image-tag: "sha-4f9c2ab"
 ```
 
+Find valid tags with `fjall releases my-app` (each release records the image tags it shipped), from the original deploy's output, or from the app's ECR repository. An image-tag rollback re-pins application code only — it does not revert infrastructure changes or roll back database migrations.
+
 ### Build-Time Args and Secrets
 
 ```yaml
@@ -271,7 +302,7 @@ A tier `target` routes to the noun-verb tier command. This runs `fjall org deplo
 - uses: fjall-tech/fjall-deploy-action@v3
   with:
     target: my-app
-    cli-version: "2.23.1"
+    cli-version: "7.0.0"
 ```
 
 ### Split Infrastructure and Code Deploys
@@ -345,6 +376,38 @@ jobs:
           environment: production
           skip-build: true
 ```
+
+## Versioning
+
+Two pins interact, and they move together:
+
+- **The action ref** — `fjall-tech/fjall-deploy-action@v3` is a moving major tag, repointed at the latest 3.x release on each republish; pin an exact tag (`@v3.0.0`) for maximum determinism.
+- **`cli-version`** — the `fjall` CLI the action installs per run; it defaults to the action major's compatible CLI major.
+
+Upgrade majors deliberately: a new action major defaults to a new CLI major, so bump the action ref and any explicit `cli-version` pin in the same change.
+
+## Troubleshooting
+
+### Blocked deploy slot
+
+> Blocked: Jane has been deploying my-app from CI since 03/08/2026, 14:02:11 (deployment cmd0a1b2c…). View progress in the Fjall dashboard: …
+
+Fjall allows one active deployment per app. A deploy that starts while another is in flight is refused with the message above — wait for the active deployment to finish (or cancel it from the dashboard), then retry. `fjall deployments list` shows your organisation's active deployments. Prevent the contention with a concurrency group ([Serialising Deploys](#serialising-deploys)).
+
+### "This deployment requires a newer fjall CLI"
+
+The Fjall API refuses deploys from a CLI older than the app's engine floor. The refusal suggests `npm install -g @fjall/cli@latest` — correct for a workstation, wrong here: the action installs the CLI per run from `cli-version`, so nothing on the runner needs upgrading. Fix it in the workflow instead:
+
+- bump `cli-version` to the required major (or a newer exact version), or
+- set `cli-version: auto` to derive the major from the app's pinned `@fjall/components-infrastructure`, or
+- move to a newer action major (each action major defaults `cli-version` to its compatible CLI major).
+
+### Authentication failures
+
+Two different credentials can fail — the error tells you which:
+
+- **Fjall API errors** (401/403 from the Fjall API) mean `FJALL_API_KEY` is missing, expired, or revoked. Deploy tokens live at most 90 days: mint a replacement in the dashboard (**Settings → CI/CD Tokens**) and update the repository secret.
+- **AWS SDK errors** (`ExpiredToken`, `AccessDenied`, credential-chain failures naming AWS services) mean the workflow's AWS credentials are wrong — see [Authentication](#authentication).
 
 ## License
 
