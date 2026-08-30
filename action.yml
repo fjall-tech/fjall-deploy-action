@@ -83,7 +83,7 @@ inputs:
   cli-version:
     description: "Pin the published fjall CLI version, `latest`, or `auto` (derive the engine major from the app's pinned @fjall/components-infrastructure, so the engine never skews across a major from the constructs it synthesises). Default: the plugin's compatible CLI major"
     required: false
-    default: "23"
+    default: "24"
   working-directory:
     description: "Directory containing fjall-config.json"
     required: false
