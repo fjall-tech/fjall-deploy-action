@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: fjall-tech/fjall-deploy-action@v17
+      - uses: fjall-tech/fjall-deploy-action@v18
         with:
           target: my-app
         env:
@@ -49,7 +49,7 @@ AWS credentials must be configured **before** this action runs. The action does 
 Pass credentials as environment variables from GitHub Secrets:
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v17
+- uses: fjall-tech/fjall-deploy-action@v18
   with:
     target: my-app
   env:
@@ -78,7 +78,7 @@ jobs:
           role-to-assume: arn:aws:iam::123456789012:role/deploy
           aws-region: us-east-2
 
-      - uses: fjall-tech/fjall-deploy-action@v17
+      - uses: fjall-tech/fjall-deploy-action@v18
         with:
           target: my-app
 ```
@@ -98,7 +98,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: fjall-tech/fjall-deploy-action@v17
+      - uses: fjall-tech/fjall-deploy-action@v18
         with:
           target: my-app
         env:
@@ -128,7 +128,7 @@ jobs:
 | `build-args`        | no       | —        | deploy, build      | Newline-separated `KEY=VALUE` pairs, each passed via `--build-arg`                                                                                                                                                                                                                     |
 | `build-secrets`     | no       | —        | deploy, build      | Newline-separated `id=ID,ssm=PATH` (or `secretsManager=NAME` \| `env=VAR`) tokens (`--build-secret`)                                                                                                                                                                                   |
 | `force`             | no       | `false`  | deploy, destroy    | Deploy: redeploy all stacks even when unchanged. Destroy: skip destruction confirmation                                                                                                                                                                                                |
-| `cli-version`       | no       | `27`     | —                  | Pin the published `fjall` CLI version. Defaults to this action's compatible major (floats across `27`.x, never crossing into the next major); `auto` derives the major from the app's pinned `@fjall/components-infrastructure`; `latest` always installs the newest published release |
+| `cli-version`       | no       | `28`     | —                  | Pin the published `fjall` CLI version. Defaults to this action's compatible major (floats across `28`.x, never crossing into the next major); `auto` derives the major from the app's pinned `@fjall/components-infrastructure`; `latest` always installs the newest published release |
 | `working-directory` | no       | `.`      | —                  | Directory containing `fjall-config.json`                                                                                                                                                                                                                                               |
 
 ## Outputs
@@ -176,7 +176,7 @@ Keep `cancel-in-progress: false`: cancelling a deploy mid-run can interrupt an i
 Deploys infrastructure and application code:
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v17
+- uses: fjall-tech/fjall-deploy-action@v18
   with:
     target: my-app
 ```
@@ -186,7 +186,7 @@ Deploys infrastructure and application code:
 Deploy infrastructure changes without rebuilding/deploying the application:
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v17
+- uses: fjall-tech/fjall-deploy-action@v18
   with:
     target: my-app
     mode: infra-only
@@ -197,7 +197,7 @@ Deploy infrastructure changes without rebuilding/deploying the application:
 Deploy application code using existing infrastructure (faster for code-only changes):
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v17
+- uses: fjall-tech/fjall-deploy-action@v18
   with:
     target: my-app
     mode: deploy-only
@@ -210,7 +210,7 @@ Deploy application code using existing infrastructure (faster for code-only chan
 Compute the change plan on pull requests without mutating anything:
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v17
+- uses: fjall-tech/fjall-deploy-action@v18
   id: plan
   continue-on-error: true
   with:
@@ -225,7 +225,7 @@ Compute the change plan on pull requests without mutating anything:
 Then apply the approved plan (the token is digest-bound — the apply re-verifies that the plan has not drifted):
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v17
+- uses: fjall-tech/fjall-deploy-action@v18
   with:
     target: my-app
     approval-token: ${{ steps.plan.outputs.approval-token }}
@@ -234,7 +234,7 @@ Then apply the approved plan (the token is digest-bound — the apply re-verifie
 Or approve in one shot in trusted pipelines:
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v17
+- uses: fjall-tech/fjall-deploy-action@v18
   with:
     target: my-app
     require-approval: true
@@ -244,7 +244,7 @@ Or approve in one shot in trusted pipelines:
 ### Roll Back to a Previous Image
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v17
+- uses: fjall-tech/fjall-deploy-action@v18
   with:
     target: my-app
     image-tag: "sha-4f9c2ab"
@@ -255,7 +255,7 @@ Find valid tags with `fjall releases my-app` (each release records the image tag
 ### Build-Time Args and Secrets
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v17
+- uses: fjall-tech/fjall-deploy-action@v18
   with:
     target: my-app
     build-args: |
@@ -268,7 +268,7 @@ Find valid tags with `fjall releases my-app` (each release records the image tag
 ### Destroy with Force
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v17
+- uses: fjall-tech/fjall-deploy-action@v18
   with:
     command: destroy
     target: my-app
@@ -278,7 +278,7 @@ Find valid tags with `fjall releases my-app` (each release records the image tag
 ### Deploy Specific Service
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v17
+- uses: fjall-tech/fjall-deploy-action@v18
   with:
     target: my-app
     service: api
@@ -290,7 +290,7 @@ Find valid tags with `fjall releases my-app` (each release records the image tag
 A tier `target` routes to the noun-verb tier command. This runs `fjall org deploy --non-interactive --no-cascade` (the organisation root stack without its platform/account cascade):
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v17
+- uses: fjall-tech/fjall-deploy-action@v18
   with:
     target: organisation
     no-cascade: true
@@ -299,7 +299,7 @@ A tier `target` routes to the noun-verb tier command. This runs `fjall org deplo
 ### Pin CLI Version
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v17
+- uses: fjall-tech/fjall-deploy-action@v18
   with:
     target: my-app
     cli-version: "7.0.0"
@@ -317,7 +317,7 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::123456789012:role/deploy
           aws-region: us-east-2
-      - uses: fjall-tech/fjall-deploy-action@v17
+      - uses: fjall-tech/fjall-deploy-action@v18
         with:
           target: my-app
           mode: infra-only
@@ -331,7 +331,7 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::123456789012:role/deploy
           aws-region: us-east-2
-      - uses: fjall-tech/fjall-deploy-action@v17
+      - uses: fjall-tech/fjall-deploy-action@v18
         with:
           target: my-app
           mode: deploy-only
@@ -355,7 +355,7 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: us-east-2
-      - uses: fjall-tech/fjall-deploy-action@v17
+      - uses: fjall-tech/fjall-deploy-action@v18
         with:
           target: my-app
           environment: staging
@@ -370,7 +370,7 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: us-east-2
-      - uses: fjall-tech/fjall-deploy-action@v17
+      - uses: fjall-tech/fjall-deploy-action@v18
         with:
           target: my-app
           environment: production
@@ -381,7 +381,7 @@ jobs:
 
 Two pins interact, and they move together:
 
-- **The action ref** — `fjall-tech/fjall-deploy-action@v17` is a moving major tag, repointed at the latest 17.x release on each republish; pin an exact tag (`@v17.0.0`) for maximum determinism.
+- **The action ref** — `fjall-tech/fjall-deploy-action@v18` is a moving major tag, repointed at the latest 18.x release on each republish; pin an exact tag (`@v18.0.0`) for maximum determinism.
 - **`cli-version`** — the `fjall` CLI the action installs per run; it defaults to the action major's compatible CLI major.
 
 Upgrade majors deliberately: a new action major defaults to a new CLI major, so bump the action ref and any explicit `cli-version` pin in the same change.
