@@ -159,7 +159,7 @@ The `result` output answers "did the step succeed". To confirm what actually shi
 
 ## Serialising Deploys
 
-Fjall allows one active deployment per organisation (the deploy slot). Give every workflow that deploys the same app a shared concurrency group — the same shape `fjall ci setup` scaffolds — so overlapping runs queue instead of contending for the slot:
+Fjall serialises deployments that touch the same infrastructure (the deploy slot): an application's deploys queue behind an in-flight deploy of the same application, of its account's infrastructure, or of the organisation, while unrelated applications deploy in parallel. Give every workflow that deploys the same app a shared concurrency group — the same shape `fjall ci setup` scaffolds — so overlapping runs queue instead of contending for the slot:
 
 ```yaml
 concurrency:
@@ -392,7 +392,7 @@ Upgrade majors deliberately: a new action major defaults to a new CLI major, so 
 
 > Blocked: Jane has been deploying my-app from CI since 03/08/2026, 14:02:11 (deployment cmd0a1b2c…). View progress in the Fjall dashboard: …
 
-Fjall allows one active deployment per organisation. An application deploy or destroy that starts while another deployment is in flight first queues behind it: the step re-claims the slot every 30 seconds for up to 20 minutes, logging who holds it, and only then fails with the message above. Tier targets (`organisation`, `platform`, `account`) route to the noun-verb commands and are not queued: they fail immediately on a held slot. Wait for the active deployment to finish (or cancel it from the dashboard), then retry. `fjall deployments list` shows your organisation's active deployments. Prevent the contention with a concurrency group ([Serialising Deploys](#serialising-deploys)).
+Fjall serialises deployments that touch the same infrastructure. An application deploy or destroy that starts while a conflicting deployment is in flight — the same application, its account's infrastructure, or the organisation — first queues behind it: the step re-claims the slot every 30 seconds for up to 20 minutes, logging who holds it, and only then fails with the message above. Tier targets (`organisation`, `platform`, `account`) route to the noun-verb commands and are not queued: they fail immediately on a held slot. Wait for the active deployment to finish (or cancel it from the dashboard), then retry. `fjall deployments list` shows your organisation's active deployments. Prevent the contention with a concurrency group ([Serialising Deploys](#serialising-deploys)).
 
 ### "This deployment requires a newer fjall CLI"
 
