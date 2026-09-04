@@ -324,7 +324,7 @@ A tier `target` routes to the noun-verb tier command. This runs `fjall org deplo
 - uses: fjall-tech/fjall-deploy-action@v21
   with:
     target: my-app
-    cli-version: "7.0.0"
+    cli-version: "31.0.0"
 ```
 
 ### Split Infrastructure and Code Deploys
