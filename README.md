@@ -42,25 +42,54 @@ Store the token as a repository secret named `FJALL_API_KEY` (`gh secret set FJA
 
 ### AWS Credentials
 
-AWS credentials must be configured **before** this action runs. The action does not manage credentials.
+The CLI resolves AWS credentials in a fixed order and **the first match wins**:
 
-#### Option 1: IAM Credentials
+1. `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` in the step's environment
+2. A named profile on the runner
+3. A Fjall-minted session, exchanged from your deploy token
 
-Pass credentials as environment variables from GitHub Secrets:
+Pick one path. If ambient AWS credentials are present the CLI uses them and
+returns immediately — it never reaches the Fjall mint, and `deploy-target` is
+resolved against whatever those credentials point at rather than the target's
+own account. Running `aws-actions/configure-aws-credentials` **and** setting
+`FJALL_API_KEY` in the same job is the usual way to get this wrong, and it
+fails silently.
+
+#### Option 1: Fjall OIDC (recommended — no AWS setup)
+
+Set `FJALL_API_KEY` and export no AWS credentials. The CLI exchanges your
+deploy token with the Fjall API for a short-lived, Fjall-signed web-identity
+token, then calls `sts:AssumeRoleWithWebIdentity` against the
+`FjallDeploy<orgId>` role that `fjall connect` created in your account. The
+deploy token _is_ the pipeline's AWS credential.
+
+You need no IAM OIDC provider of your own, no deploy role, no AWS secrets, and
+**no `id-token: write` permission** — the identity is minted by Fjall, not by
+GitHub.
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v21
-  with:
-    target: my-app
-  env:
-    AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-    AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-    AWS_REGION: us-east-2
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: fjall-tech/fjall-deploy-action@v21
+        with:
+          target: my-app
+          deploy-target: production-use1
+        env:
+          FJALL_API_KEY: ${{ secrets.FJALL_API_KEY }}
 ```
 
-#### Option 2: AWS OIDC (Recommended)
+Every CI deploy token carries the `deploy:oidc:mint` scope in its base set, so
+there is nothing extra to grant.
 
-Use GitHub's OIDC provider with `aws-actions/configure-aws-credentials` for keyless authentication:
+#### Option 2: AWS OIDC
+
+Use GitHub's OIDC provider with `aws-actions/configure-aws-credentials` for
+keyless authentication against a role you create and maintain. `id-token: write`
+is required here, and the Fjall mint is not used:
 
 ```yaml
 permissions:
@@ -83,26 +112,19 @@ jobs:
           target: my-app
 ```
 
-#### Option 3: Fjall OIDC
+#### Option 3: Static IAM credentials
 
-If your app is registered with Fjall, the CLI auto-detects GitHub's OIDC tokens via the `ACTIONS_ID_TOKEN_REQUEST_URL` environment variable. Just grant `id-token: write` permission and set your API key ([Fjall API Key](#fjall-api-key) above):
+Pass long-lived keys as environment variables from GitHub Secrets. Least
+preferred — these do not expire on their own:
 
 ```yaml
-permissions:
-  id-token: write
-  contents: read
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: fjall-tech/fjall-deploy-action@v21
-        with:
-          target: my-app
-        env:
-          FJALL_API_KEY: ${{ secrets.FJALL_API_KEY }}
+- uses: fjall-tech/fjall-deploy-action@v21
+  with:
+    target: my-app
+  env:
+    AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+    AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    AWS_REGION: us-east-2
 ```
 
 ## Inputs
