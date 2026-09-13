@@ -36,10 +36,6 @@ inputs:
     description: "Skip Docker build — use with mode: deploy-only when the image is already pushed (deploy only)"
     required: false
     default: "false"
-  skip-migrations:
-    description: "Skip database migrations during this deployment (deploy only)"
-    required: false
-    default: "false"
   no-cascade:
     description: "Skip the automatic platform/account cascade after an organisation deploy or before an organisation destroy (target: organisation only)"
     required: false
@@ -77,7 +73,7 @@ inputs:
     required: false
     default: ""
   force:
-    description: "Deploy: redeploy all stacks even when no changes are detected. Destroy: skip destruction confirmation"
+    description: "Deploy: redeploy all stacks even when no changes are detected. Destroy: bypass the busy-stack guard and destroy while the target's stacks are mid-operation. App destroys skip destruction confirmation in CI regardless; a tier destroy still needs force to pass its non-interactive confirmation"
     required: false
     default: "false"
   cli-version:
@@ -144,7 +140,6 @@ runs:
         INPUT_DEPLOY_TARGET: ${{ inputs.deploy-target }}
         INPUT_VERBOSE: ${{ inputs.verbose }}
         INPUT_SKIP_BUILD: ${{ inputs.skip-build }}
-        INPUT_SKIP_MIGRATIONS: ${{ inputs.skip-migrations }}
         INPUT_NO_CASCADE: ${{ inputs.no-cascade }}
         INPUT_REGION: ${{ inputs.region }}
         INPUT_IMAGE_TAG: ${{ inputs.image-tag }}
@@ -209,7 +204,6 @@ runs:
           if [ -n "${INPUT_ENVIRONMENT}" ]; then INCOMPATIBLE+=("environment"); fi
           if [ -n "${INPUT_DEPLOY_TARGET}" ]; then INCOMPATIBLE+=("deploy-target"); fi
           if [ "${INPUT_SKIP_BUILD}" = "true" ]; then INCOMPATIBLE+=("skip-build"); fi
-          if [ "${INPUT_SKIP_MIGRATIONS}" = "true" ]; then INCOMPATIBLE+=("skip-migrations"); fi
           if [ -n "${INPUT_REGION}" ]; then INCOMPATIBLE+=("region"); fi
           if [ -n "${INPUT_IMAGE_TAG}" ]; then INCOMPATIBLE+=("image-tag"); fi
           if [ "${INPUT_PLAN}" = "true" ]; then INCOMPATIBLE+=("plan"); fi
@@ -270,10 +264,6 @@ runs:
 
           if [ "${INPUT_SKIP_BUILD}" = "true" ]; then
             ARGS+=(--skip-build)
-          fi
-
-          if [ "${INPUT_SKIP_MIGRATIONS}" = "true" ]; then
-            ARGS+=(--skip-migrations)
           fi
 
           if [ -n "${INPUT_REGION}" ]; then
