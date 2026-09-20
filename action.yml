@@ -121,6 +121,14 @@ runs:
             echo "Failed to resolve the fjall engine from the app's @fjall/components-infrastructure pin" >&2
             exit 1
           fi
+          # An exit status is not an answer. The resolver prints one line and exits 0;
+          # a status-only check reads a silent success as a spec and hands the empty
+          # string to npm, which installs something nobody chose on the lane whose
+          # whole purpose is to pick the right major. Emptiness is its own refusal.
+          if [ -z "${RESOLVED_ENGINE_SPEC}" ]; then
+            echo "The fjall engine resolver exited 0 without naming an engine — refusing to install an unnamed one" >&2
+            exit 1
+          fi
           npm install -g "${RESOLVED_ENGINE_SPEC}"
         else
           npm install -g "fjall@${CLI_VERSION}"
