@@ -23,12 +23,12 @@ jobs:
       - uses: fjall-tech/fjall-deploy-action@v29
         with:
           target: my-app
+          deploy-target: production-use1
         env:
           FJALL_API_KEY: ${{ secrets.FJALL_API_KEY }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_REGION: us-east-2
 ```
+
+The deploy token is also the deploy's AWS credential (Option 1 under [Authentication](#authentication)), so the job exports no AWS keys.
 
 ## Authentication
 
@@ -110,7 +110,12 @@ jobs:
       - uses: fjall-tech/fjall-deploy-action@v29
         with:
           target: my-app
+          deploy-target: production-use1
 ```
+
+The CLI cannot renew a session it reads from the environment, so a deploy that
+runs longer than the role session (one that upgrades database engines, for
+example) fails when the session expires.
 
 #### Option 3: Static IAM credentials
 
@@ -121,11 +126,17 @@ preferred — these do not expire on their own:
 - uses: fjall-tech/fjall-deploy-action@v29
   with:
     target: my-app
+    deploy-target: production-use1
   env:
     AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
     AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
     AWS_REGION: us-east-2
 ```
+
+The CLI cannot renew keys it reads from the environment, so when you pass
+temporary session keys here instead (with `AWS_SESSION_TOKEN`), a deploy that
+runs longer than their session (one that upgrades database engines, for
+example) fails when they expire.
 
 ## Inputs
 
