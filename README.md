@@ -67,6 +67,11 @@ You need no IAM OIDC provider of your own, no deploy role, no AWS secrets, and
 **no `id-token: write` permission** — the identity is minted by Fjall, not by
 GitHub.
 
+The session this path mints lasts one hour. From fjall 40, the CLI renews it
+through the deploy token before it expires, so a deploy can run past the hour.
+Fjall 39 and earlier renew no session on any path, so with them a deploy that
+runs longer than an hour fails part-way on this path too.
+
 ```yaml
 jobs:
   deploy:
