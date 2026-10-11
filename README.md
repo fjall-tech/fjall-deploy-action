@@ -30,6 +30,8 @@ jobs:
 
 The deploy token is also the deploy's AWS credential (Option 1 under [Authentication](#authentication)), so the job exports no AWS keys.
 
+If the deploy job sets `timeout-minutes`, make it 360, the timeout `fjall ci setup` writes, GitHub's default, and the most a job on a GitHub-hosted runner may run: from fjall 40, a deploy waits out each database engine upgrade, which AWS has held for up to three hours. When a plan's upgrades could wait longer than 360 minutes, the plan warns before anything is upgraded (`database-engine-ci-job-limit`). Fjall cannot read the job's own `timeout-minutes`, so it reads 360 on a GitHub-hosted and a self-hosted runner alike. As of 2026-10-11 that has two costs: a lower `timeout-minutes` goes unwarned, and a job on a self-hosted runner that raised its `timeout-minutes` above 360 is still warned, and cannot silence the warning. A job stopped mid-upgrade leaves the upgrade running in RDS, and re-running the deploy waits for it and resumes.
+
 ## Authentication
 
 Two credentials are involved: a Fjall deploy token (`FJALL_API_KEY`) and AWS credentials.
