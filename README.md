@@ -16,7 +16,7 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
 
@@ -31,6 +31,10 @@ jobs:
 The deploy token is also the deploy's AWS credential (Option 1 under [Authentication](#authentication)), so the job exports no AWS keys.
 
 If the deploy job sets `timeout-minutes`, make it 360, the timeout `fjall ci setup` writes, GitHub's default, and the most a job on a GitHub-hosted runner may run: from fjall 40, a deploy waits out each database engine upgrade, which AWS has held for up to three hours. When a plan's upgrades could wait longer than 360 minutes, the plan warns before anything is upgraded (`database-engine-ci-job-limit`). Fjall cannot read the job's own `timeout-minutes`, so it reads 360 on a GitHub-hosted and a self-hosted runner alike. As of 2026-10-11 that has two costs: a lower `timeout-minutes` goes unwarned, and a job on a self-hosted runner that raised its `timeout-minutes` above 360 is still warned, and cannot silence the warning. A job stopped mid-upgrade leaves the upgrade running in RDS, and re-running the deploy waits for it and resumes.
+
+## Runner Architecture
+
+Fjall builds ECS images for `linux/arm64`, the platform its tasks run on, so run the job on an arm64 runner: `ubuntu-24.04-arm` on GitHub-hosted runners, which `fjall ci setup` writes from fjall 40. Fjall 39's `ci setup` writes `ubuntu-latest`, so in a workflow it generated, change `runs-on` by hand. An x86 runner such as `ubuntu-latest` builds the image only under emulation, which the action does not set up: without an emulator a `RUN` step fails with an exec format error, and with one (`docker/setup-qemu-action`) the build typically runs several times slower.
 
 ## Authentication
 
@@ -77,7 +81,7 @@ runs longer than an hour fails part-way on this path too.
 ```yaml
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
 
@@ -105,7 +109,7 @@ permissions:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
 
@@ -349,7 +353,7 @@ A tier `target` routes to the noun-verb tier command. This runs `fjall org deplo
 ```yaml
 jobs:
   infra:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
       - uses: aws-actions/configure-aws-credentials@v4
@@ -363,7 +367,7 @@ jobs:
 
   code:
     needs: infra
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
       - uses: aws-actions/configure-aws-credentials@v4
@@ -386,7 +390,7 @@ on:
 
 jobs:
   staging:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     environment: staging
     steps:
       - uses: actions/checkout@v4
@@ -401,7 +405,7 @@ jobs:
 
   production:
     needs: staging
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     environment: production
     steps:
       - uses: actions/checkout@v4
@@ -424,6 +428,12 @@ Two pins interact, and they move together:
 - **`cli-version`** — the `fjall` CLI the action installs per run; it defaults to the action major's compatible CLI major.
 
 Upgrade majors deliberately: a new action major defaults to a new CLI major, so bump the action ref and any explicit `cli-version` pin in the same change.
+
+## Caching
+
+The action restores no cache: it installs the CLI with `npm install -g` on every run, which on a GitHub-hosted runner downloads the whole CLI each time. What a restored cache holds decides what runs in a job that has `FJALL_API_KEY` and AWS credentials, and any workflow run on the default branch that a push, a schedule or a dispatch started can write an entry the deploy job would restore, with contents GitHub does not verify (GitHub's [dependency caching](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching) docs, read 2026-10-15).
+
+npm's own cache is no exception: npm checks a package against the integrity its metadata names, and reads that metadata from the same cache. Measured on npm 11.17.0 (2026-10-15), metadata and a tarball planted in npm's cache made `npm install -g` install a version the registry never published, and run its install script. With `--prefer-online`, npm asked the registry, which answered the ETags the planted entries carried with 304 Not Modified, and npm kept the planted copies. So put no npm cache into a job that runs this action: no `actions/cache` step over `~/.npm`, and on an `actions/setup-node` step no `cache` input and, from setup-node v5, `package-manager-cache: false`. A self-hosted runner that keeps its home directory between jobs keeps npm's cache too, and every workflow it runs can write it: a runner that runs untrusted workflows should not run deploys.
 
 ## Troubleshooting
 
