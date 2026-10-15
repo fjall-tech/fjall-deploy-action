@@ -174,6 +174,8 @@ example) fails when they expire.
 | `cli-version`       | no       | `39`     | —                  | Pin the published `fjall` CLI version. Defaults to this action's compatible major (floats across `39`.x, never crossing into the next major); `auto` derives the major from the app's pinned `@fjall/components-infrastructure`; `latest` always installs the newest published release              |
 | `working-directory` | no       | `.`      | —                  | Directory containing `fjall-config.json`                                                                                                                                                                                                                                                            |
 
+A plan and the approval gate cover a full or `infra-only` deploy. `mode: deploy-only` and `image-tag` apply no change set, so they have no plan, and a run of either with `plan`, `require-approval` or `approval-token` is refused before anything is deployed. Through CLI 39.0.8 such a run went ahead without either.
+
 ## Outputs
 
 | Output           | Description                                                                                  |
@@ -237,7 +239,7 @@ Deploy infrastructure changes without rebuilding/deploying the application:
 
 ### Code Only
 
-Deploy application code using existing infrastructure (faster for code-only changes):
+Deploy application code using existing infrastructure (faster for code-only changes). A code-only deploy builds and rolls only what the assembly a full deploy writes to `fjall/<app>/cdk.out` declares, so it needs that assembly in the job's checkout. A fresh runner has none, and there the deploy is refused (through CLI 39.0.8 it rolled nothing and exited 0; an app with capacity-identity pins was refused instead). On a fresh runner, use a full deploy, or `image-tag` for an image already built, which rolls the services the app's Compute stack exports with no assembly; an app with a container-image function in the roll needs the assembly for that too. Where a step earlier in the same job wrote the assembly, such as an `infra-only` deploy (Split Infrastructure and Code Deploys, below), the code-only step is:
 
 ```yaml
 - uses: fjall-tech/fjall-deploy-action@v29
@@ -320,6 +322,8 @@ Find valid tags with `fjall releases my-app` (each release records the image tag
 
 ### Deploy Specific Service
 
+`service` narrows a code-only deploy, or an `image-tag` roll, to one service. A code-only deploy needs the assembly a full deploy wrote (Code Only, above):
+
 ```yaml
 - uses: fjall-tech/fjall-deploy-action@v29
   with:
@@ -350,9 +354,11 @@ A tier `target` routes to the noun-verb tier command. This runs `fjall org deplo
 
 ### Split Infrastructure and Code Deploys
 
+Run both steps in one job: the code step builds and rolls what the assembly the infrastructure step synthesised to `fjall/<app>/cdk.out` declares. A code step in a job of its own starts on a fresh runner with no assembly, and is refused there (Code Only, above).
+
 ```yaml
 jobs:
-  infra:
+  deploy:
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
@@ -364,16 +370,6 @@ jobs:
         with:
           target: my-app
           mode: infra-only
-
-  code:
-    needs: infra
-    runs-on: ubuntu-24.04-arm
-    steps:
-      - uses: actions/checkout@v4
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: arn:aws:iam::123456789012:role/deploy
-          aws-region: us-east-2
       - uses: fjall-tech/fjall-deploy-action@v29
         with:
           target: my-app
