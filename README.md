@@ -51,15 +51,19 @@ Store the token as a repository secret named `FJALL_API_KEY` (`gh secret set FJA
 The CLI resolves AWS credentials in a fixed order and **the first match wins**:
 
 1. `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY` in the step's environment
-2. A named profile on the runner
-3. A Fjall-minted session, exchanged from your deploy token
+2. A Fjall-minted session, exchanged from your deploy token
 
-Pick one path. If ambient AWS credentials are present the CLI uses them and
-returns immediately — it never reaches the Fjall mint, and `deploy-target` is
-resolved against whatever those credentials point at rather than the target's
-own account. Running `aws-actions/configure-aws-credentials` **and** setting
-`FJALL_API_KEY` in the same job is the usual way to get this wrong, and it
-fails silently.
+Pick one path. With `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` in the
+step's environment the CLI uses them and never reaches the Fjall mint. With
+fjall 39, an application deploy then runs in whatever account they belong to,
+whatever target `deploy-target` or `environment` picks, and in `AWS_REGION`
+(else `AWS_DEFAULT_REGION`, else `us-east-2`) unless `region` is set. From
+fjall 40, the CLI first confirms they belong to that target's account and,
+when they do not, refuses the deploy before it records or changes anything,
+naming both accounts and the variables to unset; keys that belong to it deploy
+in the target's own region unless `region` is set. Running
+`aws-actions/configure-aws-credentials` in a job meant to deploy through the
+Fjall mint is the usual way to get this wrong.
 
 #### Option 1: Fjall OIDC (recommended — no AWS setup)
 
@@ -116,7 +120,7 @@ jobs:
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::123456789012:role/deploy
-          aws-region: us-east-2
+          aws-region: us-east-1
 
       - uses: fjall-tech/fjall-deploy-action@v29
         with:
@@ -141,7 +145,7 @@ preferred — these do not expire on their own:
   env:
     AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
     AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-    AWS_REGION: us-east-2
+    AWS_REGION: us-east-1
 ```
 
 The CLI cannot renew keys it reads from the environment, so when you pass
