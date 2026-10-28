@@ -81,7 +81,7 @@ inputs:
     required: false
     default: "39"
   working-directory:
-    description: "Directory containing fjall-config.json"
+    description: "Folder that holds the project's fjall/ folder, relative to the repository's checkout. fjall runs there"
     required: false
     default: "."
 

@@ -42,7 +42,7 @@ Two credentials are involved: a Fjall deploy token (`FJALL_API_KEY`) and AWS cre
 
 ### Fjall API Key
 
-The CLI authenticates to Fjall via `FJALL_API_KEY` — an app-scoped `fjall_dk_` deploy token used to record the deployment, hold the app's deploy slot, and read organisation config. Deploy tokens are minted from a signed-in browser session by an owner or admin (**Settings → CI/CD Tokens** in the [Fjall dashboard](https://fjall.io)); the CLI carries no mint path — `fjall ci setup` writes the workflow and prints the URL to mint at. Tokens expire after at most 90 days — re-mint from the same page and update the secret to rotate.
+The CLI authenticates to Fjall via `FJALL_API_KEY` — an app-scoped `fjall_dk_` deploy token used to record the deployment, hold the app's deploy slot, and read organisation config. A deploy token is minted only in a signed in browser session of an owner or admin. From a checkout of the repository, run `fjall ci token create --app <app> --target <target>` (CLI 40.0.0 or later). You approve its request in your own browser session, because only the person whose Fjall credential opened a request can approve it. Then the command stores the token as the `FJALL_API_KEY` repository secret itself, through `gh`. Or mint one on **Settings → CI/CD Tokens** in the [Fjall dashboard](https://fjall.io), the page whose URL `fjall ci setup` prints. Tokens expire after at most 90 days. To rotate, run the command again, or re-mint from the same page and update the secret.
 
 Store the token as a repository secret named `FJALL_API_KEY` (`gh secret set FJALL_API_KEY`) and pass it in the step's `env:` block as in the Quick Start. It takes precedence over any credentials stored on the runner (`~/.fjall/auth.json`).
 
@@ -176,7 +176,7 @@ example) fails when they expire.
 | `build-secrets`     | no       | —        | deploy, build      | Newline-separated `id=ID,ssm=PATH` (or `secretsManager=NAME` \| `env=VAR`) tokens (`--build-secret`)                                                                                                                                                                                                |
 | `force`             | no       | `false`  | deploy, destroy    | Deploy: redeploy all stacks even when no changes are detected. Destroy: bypass the busy-stack guard and destroy while the target's stacks are mid-operation. App destroys skip destruction confirmation in CI regardless; a tier destroy still needs force to pass its non-interactive confirmation |
 | `cli-version`       | no       | `39`     | —                  | Pin the published `fjall` CLI version. Defaults to this action's compatible major (floats across `39`.x, never crossing into the next major); `auto` derives the major from the app's pinned `@fjall/components-infrastructure`; `latest` always installs the newest published release              |
-| `working-directory` | no       | `.`      | —                  | Directory containing `fjall-config.json`                                                                                                                                                                                                                                                            |
+| `working-directory` | no       | `.`      | —                  | Folder that holds the project's `fjall/` folder, relative to the repository's checkout. `fjall` runs there                                                                                                                                                                                          |
 
 A plan and the approval gate cover a full or `infra-only` deploy. `mode: deploy-only` and `image-tag` apply no change set, so they have no plan, and a run of either with `plan`, `require-approval` or `approval-token` is refused before anything is deployed. Through CLI 39.0.8 such a run went ahead without either.
 
@@ -455,7 +455,7 @@ The Fjall API refuses deploys from a CLI older than the app's engine floor. The 
 
 Two different credentials can fail — the error tells you which:
 
-- **Fjall API errors** (401/403 from the Fjall API) mean `FJALL_API_KEY` is missing, expired, or revoked. Deploy tokens live at most 90 days: mint a replacement in the dashboard (**Settings → CI/CD Tokens**) and update the repository secret.
+- **Fjall API errors** (401/403 from the Fjall API) mean `FJALL_API_KEY` is missing, expired, or revoked. Deploy tokens live at most 90 days. Run `fjall ci token create` again for a replacement, or mint one in the dashboard (**Settings → CI/CD Tokens**) and update the repository secret.
 - **AWS SDK errors** (`ExpiredToken`, `AccessDenied`, credential-chain failures naming AWS services) mean the workflow's AWS credentials are wrong — see [Authentication](#authentication).
 
 ## License
