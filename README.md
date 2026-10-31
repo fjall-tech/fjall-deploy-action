@@ -178,7 +178,7 @@ example) fails when they expire.
 | `cli-version`       | no       | `39`     | —                  | Pin the published `fjall` CLI version. Defaults to this action's compatible major (floats across `39`.x, never crossing into the next major); `auto` derives the major from the app's pinned `@fjall/components-infrastructure`; `latest` always installs the newest published release              |
 | `working-directory` | no       | `.`      | —                  | Folder that holds the project's `fjall/` folder, relative to the repository's checkout. `fjall` runs there                                                                                                                                                                                          |
 
-A plan and the approval gate cover a full or `infra-only` deploy. `mode: deploy-only` and `image-tag` apply no change set, so they have no plan, and a run of either with `plan`, `require-approval` or `approval-token` is refused before anything is deployed. Through CLI 39.0.8 such a run went ahead without either.
+A plan and the approval gate cover a full or `infra-only` deploy. `mode: deploy-only` and `image-tag` change no template, so they have no plan, and a run of either with `plan`, `require-approval` or `approval-token` is refused before anything is deployed. Through CLI 39.0.8 such a run went ahead without either.
 
 ## Outputs
 
