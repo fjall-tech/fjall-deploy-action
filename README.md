@@ -70,8 +70,8 @@ Fjall mint is the usual way to get this wrong.
 Set `FJALL_API_KEY` and export no AWS credentials. The CLI exchanges your
 deploy token with the Fjall API for a short-lived, Fjall-signed web-identity
 token, then calls `sts:AssumeRoleWithWebIdentity` against the
-`FjallDeploy<orgId>` role that `fjall connect` created in your account. The
-deploy token _is_ the pipeline's AWS credential.
+`FjallDeploy<orgId>` role Fjall created when you connected your AWS account.
+The deploy token _is_ the pipeline's AWS credential.
 
 You need no IAM OIDC provider of your own, no deploy role, no AWS secrets, and
 **no `id-token: write` permission** — the identity is minted by Fjall, not by
