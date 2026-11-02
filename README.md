@@ -34,7 +34,9 @@ If the deploy job sets `timeout-minutes`, make it 360, the timeout `fjall ci set
 
 ## Runner Architecture
 
-Fjall builds ECS images for `linux/arm64`, the platform its tasks run on, so run the job on an arm64 runner: `ubuntu-24.04-arm` on GitHub-hosted runners, which `fjall ci setup` writes from fjall 40. Fjall 39's `ci setup` writes `ubuntu-latest`, so in a workflow it generated, change `runs-on` by hand. An x86 runner such as `ubuntu-latest` builds the image only under emulation, which the action does not set up: without an emulator a `RUN` step fails with an exec format error, and with one (`docker/setup-qemu-action`) the build typically runs several times slower.
+Fjall builds ECS images for `linux/arm64`, the platform its tasks run on, and a container Lambda's image for its `architecture`. Run the job on a runner of the architecture those images build for: `ubuntu-24.04-arm` on GitHub-hosted runners, which `fjall ci setup` writes from fjall 40. From fjall 40 it writes `ubuntu-24.04` only when the manifest a synth left in the app's `cdk.out` lists only x86_64 images. It stays on `ubuntu-24.04-arm` otherwise. When `cdk.out` holds no current list, a warning names the commands that write one and the rerun, and when the app builds both, a warning names each x86_64 Lambda. Fjall 39's `ci setup` writes `ubuntu-latest`, so in a workflow it generated for an app that builds arm64 images, change `runs-on` by hand.
+
+On an x86 runner such as `ubuntu-latest`, an arm64 image's `RUN` steps can run only under emulation, which the action does not register. The default BuildKit image behind Fjall's `fjall` builder ships one (`buildkit-qemu-aarch64`, checked on BuildKit 0.33.1), and BuildKit documents that most builds need no manual QEMU setup. BuildKit also documents emulation as much slower than a native build, and advises against it for compiling. A `RUN` step can still fail when its container mixes binaries for several architectures. BuildKit's documented cure is to register QEMU on the host, which `docker/setup-qemu-action` does.
 
 ## Authentication
 
