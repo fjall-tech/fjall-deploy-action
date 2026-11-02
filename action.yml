@@ -13,7 +13,7 @@ inputs:
     description: "An application name, or a tier: organisation, platform, or account. App targets run the app's deploy/destroy/build; tier targets run the noun-verb tier command (fjall org|platform|account deploy|destroy). Build is application-only."
     required: true
   service:
-    description: "Specific service name (deploy and build only)"
+    description: "One service (deploy and build only), from fjall 40 by its whole name, ignoring case. Fjall 39 also selects every service whose name ends with it"
     required: false
     default: ""
   mode:
