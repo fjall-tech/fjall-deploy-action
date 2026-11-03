@@ -13,7 +13,7 @@ inputs:
     description: "An application name, or a tier: organisation, platform, or account. App targets run the app's deploy/destroy/build; tier targets run the noun-verb tier command (fjall org|platform|account deploy|destroy). Build is application-only."
     required: true
   service:
-    description: "One service (deploy and build only), from fjall 40 by its whole name, ignoring case. Fjall 39 also selects every service whose name ends with it"
+    description: "One service (deploy and build only), from fjall 40 by its whole name, ignoring case. Fjall 39 also selects every service whose name ends with it. A deploy narrows to it only with mode deploy-only or image-tag. Fjall 40 refuses it on any other deploy, and fjall 39 leaves it unread"
     required: false
     default: ""
   mode:
@@ -33,7 +33,7 @@ inputs:
     required: false
     default: "false"
   skip-build:
-    description: "Skip Docker build — use with mode: deploy-only when the image is already pushed (deploy only)"
+    description: "Skip a static-site or OpenNext build command when its output is already built; never skips a Docker build (deploy only)"
     required: false
     default: "false"
   no-cascade:
@@ -49,11 +49,11 @@ inputs:
     required: false
     default: ""
   plan:
-    description: "Compute and print the change plan, then stop before any mutation. Exit 0 = no changes, 2 = changes pending approval, 1 = error (deploy only)"
+    description: "Compute and print the change plan, then stop before any mutation. Exit 0 = no changes, 2 = changes pending approval, 1 = error (deploy only; not with mode deploy-only or image-tag, which change no template)"
     required: false
     default: "false"
   require-approval:
-    description: "Engage the approval gate: refuse to mutate unless the plan is approved via auto-approve or a prior approval-token (deploy only)"
+    description: "Engage the approval gate: refuse to mutate unless the plan is approved via auto-approve or a prior approval-token (deploy only; not with mode deploy-only or image-tag, which change no template)"
     required: false
     default: "false"
   auto-approve:
@@ -61,7 +61,7 @@ inputs:
     required: false
     default: "false"
   approval-token:
-    description: "Resume an approved plan from a prior plan run; the plan digest is re-verified before applying (deploy only)"
+    description: "Resume an approved plan from a prior plan run; the plan digest is re-verified before applying (deploy only; not with mode deploy-only or image-tag, which change no template)"
     required: false
     default: ""
   build-args:
