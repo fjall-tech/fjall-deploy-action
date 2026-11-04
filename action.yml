@@ -4,6 +4,10 @@ branding:
   icon: "cloud"
   color: "gray-dark"
 
+# GitHub hands an input left out its default, so every input but target
+# has one, and an input given an empty value is refused as one the caller
+# wrote. The inputs with no value of their own default to `-`, which none
+# of them may begin with, and Check inputs reads it as left out.
 inputs:
   command:
     description: "Command to run: deploy, destroy, or build"
@@ -15,7 +19,7 @@ inputs:
   service:
     description: "One service (deploy and build only), from fjall 40 by its whole name, ignoring case. Fjall 39 also selects every service whose name ends with it. A deploy narrows to it only with mode deploy-only or image-tag. Fjall 40 refuses it on any other deploy, and fjall 39 leaves it unread"
     required: false
-    default: ""
+    default: "-"
   mode:
     description: "Deploy mode: full, infra-only, or deploy-only (deploy only)"
     required: false
@@ -23,11 +27,11 @@ inputs:
   environment:
     description: "Target environment (maps to the -e flag; deploy only)"
     required: false
-    default: ""
+    default: "-"
   deploy-target:
     description: "Deploy to a specific fjall target (a `fjall target list` name, e.g. production-use1) — maps to --target: the precise credential where, vs environment's stage selector. App targets only (deploy, destroy, build)"
     required: false
-    default: ""
+    default: "-"
   verbose:
     description: "Enable verbose output (-v)"
     required: false
@@ -43,11 +47,11 @@ inputs:
   region:
     description: "Deploy to a specific region within the target's account (deploy only)"
     required: false
-    default: ""
+    default: "-"
   image-tag:
     description: "Roll forward/back to an existing image tag — skips build, implies deploy-only (deploy only)"
     required: false
-    default: ""
+    default: "-"
   plan:
     description: "Compute and print the change plan, then stop before any mutation. Exit 0 = no changes, 2 = changes pending approval, 1 = error (deploy only; not with mode deploy-only or image-tag, which change no template)"
     required: false
@@ -63,15 +67,15 @@ inputs:
   approval-token:
     description: "Resume an approved plan from a prior plan run; the plan digest is re-verified before applying (deploy only; not with mode deploy-only or image-tag, which change no template)"
     required: false
-    default: ""
+    default: "-"
   build-args:
     description: "Public build-time args as newline-separated KEY=VALUE pairs, each passed via --build-arg (deploy and build)"
     required: false
-    default: ""
+    default: "-"
   build-secrets:
     description: "Ad-hoc build secret refs as newline-separated id=ID,ssm=PATH (or secretsManager=NAME | env=VAR) tokens, each passed via --build-secret (deploy and build)"
     required: false
-    default: ""
+    default: "-"
   force:
     description: "Deploy: deploy every stack, including those with no detected changes (CloudFormation leaves an unchanged stack as it is). Destroy: bypass the busy-stack guard and destroy while the target's stacks are mid-operation. App destroys skip destruction confirmation in CI regardless; a tier destroy still needs force to pass its non-interactive confirmation"
     required: false
@@ -87,7 +91,7 @@ inputs:
 
 outputs:
   result:
-    description: "Command result: success, plan-pending (exit code 2 — changes pending approval or rejected at the gate), or failure"
+    description: "Command result: success, plan-pending (exit code 2: the run stopped without failing, with changes pending approval, refused at the approval gate, or cancelled before it completed, which can follow a partial change; approval-token is set only for pending changes), or failure"
     value: ${{ steps.run.outputs.result }}
   duration:
     description: "Command duration in seconds"
@@ -99,47 +103,27 @@ outputs:
 runs:
   using: "composite"
   steps:
-    - name: Setup Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: "24"
-
-    - name: Install Fjall CLI
+    # A composite action hands every one of its steps the env of the step that
+    # uses it, so the deploy token and AWS keys a caller passes there reach
+    # them all: every step but Run Fjall takes them out, and Run Fjall hands
+    # the token to the CLI alone. When the job grants
+    # `id-token: write`, the runner also sets GitHub's OIDC request token in
+    # each step, after its env:, so only a script can take that out: the
+    # install step does, and Check inputs, which starts nothing but mktemp,
+    # and Setup Node.js keep it.
+    #
+    # Every input is checked, and the fjall command composed from them, before
+    # Node or the CLI is installed. The command reaches the Run Fjall step as
+    # a file of NUL-separated arguments, so a value carrying spaces stays one
+    # argument.
+    - name: Check inputs
+      id: inputs
       shell: bash
       env:
-        CLI_VERSION: ${{ inputs.cli-version }}
-        WORKING_DIRECTORY: ${{ inputs.working-directory }}
-      run: |
-        if [ "${CLI_VERSION}" = "latest" ]; then
-          npm install -g fjall
-        elif [ "${CLI_VERSION}" = "auto" ]; then
-          # Match the engine major to the app's pinned @fjall/components-infrastructure
-          # so the deploy engine never skews across a major from the constructs it
-          # synthesises (engine-version contract). github.action_path is GitHub-controlled;
-          # WORKING_DIRECTORY reaches the script via argv, never interpolated into the shell.
-          if ! RESOLVED_ENGINE_SPEC="$(node "${{ github.action_path }}/resolve-fjall-engine.mjs" "${WORKING_DIRECTORY}")"; then
-            echo "Failed to resolve the fjall engine from the app's @fjall/components-infrastructure pin" >&2
-            exit 1
-          fi
-          # An exit status is not an answer. The resolver prints one line and exits 0;
-          # a status-only check reads a silent success as a spec and hands the empty
-          # string to npm, which installs something nobody chose on the lane whose
-          # whole purpose is to pick the right major. Emptiness is its own refusal.
-          if [ -z "${RESOLVED_ENGINE_SPEC}" ]; then
-            echo "The fjall engine resolver exited 0 without naming an engine — refusing to install an unnamed one" >&2
-            exit 1
-          fi
-          npm install -g "${RESOLVED_ENGINE_SPEC}"
-        else
-          npm install -g "fjall@${CLI_VERSION}"
-        fi
-        echo "Installed $(fjall --version)"
-
-    - name: Run Fjall
-      id: run
-      shell: bash
-      working-directory: ${{ inputs.working-directory }}
-      env:
+        FJALL_API_KEY: ""
+        AWS_ACCESS_KEY_ID: ""
+        AWS_SECRET_ACCESS_KEY: ""
+        AWS_SESSION_TOKEN: ""
         INPUT_COMMAND: ${{ inputs.command }}
         INPUT_TARGET: ${{ inputs.target }}
         INPUT_SERVICE: ${{ inputs.service }}
@@ -158,18 +142,95 @@ runs:
         INPUT_BUILD_ARGS: ${{ inputs.build-args }}
         INPUT_BUILD_SECRETS: ${{ inputs.build-secrets }}
         INPUT_FORCE: ${{ inputs.force }}
+        INPUT_CLI_VERSION: ${{ inputs.cli-version }}
+        INPUT_WORKING_DIRECTORY: ${{ inputs.working-directory }}
       run: |
+        # A refusal names the input and the rule, never the value: nothing has
+        # shown what a refused value holds, and the job log keeps it. Keep in
+        # lockstep with the Buildkite plugin's hooks/command.
+        refuse() {
+          echo "Error: $1" >&2
+          exit 1
+        }
+        NOT_REPEATED="The value given is not repeated here."
+
+        # A boolean input is exactly `true` or `false`, which is what GitHub
+        # hands an action for a YAML `true` or `false`; an input left out
+        # takes action.yml's default, false. Anything else (`'yes'`, `1`,
+        # `'True'`, or an expression that came out empty) the reads below
+        # would take as false, which for plan, require-approval and
+        # no-cascade is the arm that changes more.
+        require_boolean() {
+          case "$2" in
+            true | false) ;;
+            "") refuse "'$1' is empty: give true or false, or leave it out to take its default." ;;
+            *) refuse "'$1' must be true or false. ${NOT_REPEATED}" ;;
+          esac
+        }
+        require_boolean verbose "${INPUT_VERBOSE}"
+        require_boolean skip-build "${INPUT_SKIP_BUILD}"
+        require_boolean no-cascade "${INPUT_NO_CASCADE}"
+        require_boolean plan "${INPUT_PLAN}"
+        require_boolean require-approval "${INPUT_REQUIRE_APPROVAL}"
+        require_boolean auto-approve "${INPUT_AUTO_APPROVE}"
+        require_boolean force "${INPUT_FORCE}"
+
+        # A string input given an empty value is refused too, and for the
+        # same cause: an input left out takes its default, so an empty one
+        # is what the caller wrote, most often an expression that came out
+        # empty. Most reads would take it as the input left out, so an empty
+        # image-tag would build and deploy rather than roll back, and one
+        # does worse: an empty cli-version would install `fjall@`, which npm
+        # reads as the newest release of any major. An empty target is
+        # refused as a missing one: with no default, the two cannot be told
+        # apart.
+        require_value() {
+          if [ -z "$2" ]; then
+            refuse "'$1' is empty: give it a value, or leave it out."
+          fi
+        }
+        require_value command "${INPUT_COMMAND}"
+        require_value service "${INPUT_SERVICE}"
+        require_value mode "${INPUT_MODE}"
+        require_value environment "${INPUT_ENVIRONMENT}"
+        require_value deploy-target "${INPUT_DEPLOY_TARGET}"
+        require_value region "${INPUT_REGION}"
+        require_value image-tag "${INPUT_IMAGE_TAG}"
+        require_value approval-token "${INPUT_APPROVAL_TOKEN}"
+        require_value build-args "${INPUT_BUILD_ARGS}"
+        require_value build-secrets "${INPUT_BUILD_SECRETS}"
+        require_value cli-version "${INPUT_CLI_VERSION}"
+        require_value working-directory "${INPUT_WORKING_DIRECTORY}"
+
+        # action.yml's `-`, the default of an input with no value of its
+        # own, reads as left out from here on, and so does a caller's `-`.
+        for name in INPUT_SERVICE INPUT_ENVIRONMENT INPUT_DEPLOY_TARGET \
+          INPUT_REGION INPUT_IMAGE_TAG INPUT_APPROVAL_TOKEN \
+          INPUT_BUILD_ARGS INPUT_BUILD_SECRETS; do
+          if [ "${!name}" = "-" ]; then
+            printf -v "${name}" '%s' ""
+          fi
+        done
+
+        # `-` means none only for an input with no value of its own. Of the
+        # rest, cli-version would hand it to npm as a version and
+        # working-directory to the Run Fjall step as its directory, so both
+        # refuse it, as the other input checks refuse it everywhere else.
+        reject_none_marker() {
+          if [ "$2" = "-" ]; then
+            refuse "'$1' cannot be '-', which means none only for an input without a default: leave it out to take its default."
+          fi
+        }
+        reject_none_marker cli-version "${INPUT_CLI_VERSION}"
+        reject_none_marker working-directory "${INPUT_WORKING_DIRECTORY}"
+
         # Reject flag-shaped property values before they reach fjall. Inputs are
         # interpolated from workflow YAML / GitHub context; a value beginning
         # with '-' would be parsed by commander as a flag rather than a value,
-        # even though each is passed as a quoted argv element. Fail fast. Keep in
-        # lockstep with the Buildkite plugin's hooks/command.
+        # even though each is passed as a quoted argv element.
         reject_leading_dash() {
           case "$2" in
-            -*)
-              echo "Error: '$1' must not begin with '-' (got '$2')." >&2
-              exit 1
-              ;;
+            -*) refuse "'$1' must not begin with '-'. ${NOT_REPEATED}" ;;
           esac
         }
         reject_leading_dash command "${INPUT_COMMAND}"
@@ -181,6 +242,11 @@ runs:
         reject_leading_dash region "${INPUT_REGION}"
         reject_leading_dash image-tag "${INPUT_IMAGE_TAG}"
         reject_leading_dash approval-token "${INPUT_APPROVAL_TOKEN}"
+
+        if [ -z "${INPUT_TARGET}" ]; then
+          echo "Error: 'target' is required" >&2
+          exit 1
+        fi
 
         # Classify the target. The app-only `ci run <cmd> <target>` shim rejects
         # the tier words (T3: tier deploys and destroys are noun-verb), so an
@@ -202,7 +268,7 @@ runs:
           # input is rejected here rather than silently dropped, so a
           # `plan: true` can never become an unpreviewed tier mutation.
           if [ "${INPUT_COMMAND}" != "deploy" ] && [ "${INPUT_COMMAND}" != "destroy" ]; then
-            echo "Error: command '${INPUT_COMMAND}' is application-only; tier target '${INPUT_TARGET}' supports deploy and destroy only." >&2
+            echo "Error: tier target '${INPUT_TARGET}' supports the commands deploy and destroy only (build is application-only). The value given is not repeated here." >&2
             exit 1
           fi
 
@@ -325,37 +391,131 @@ runs:
           fi
         fi
 
+        ARGV_FILE="$(mktemp "${RUNNER_TEMP}/fjall-deploy-argv.XXXXXX")"
+        printf '%s\0' "${ARGS[@]}" > "${ARGV_FILE}"
+        echo "argv-file=${ARGV_FILE}" >> "${GITHUB_OUTPUT}"
+
+    # Pinned by commit: setup-node v4.4.0. The runner still hands a node
+    # action its own runtime token, and the OIDC request token when the job
+    # grants `id-token: write`, after this `env:` is applied.
+    - name: Setup Node.js
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      env:
+        FJALL_API_KEY: ""
+        AWS_ACCESS_KEY_ID: ""
+        AWS_SECRET_ACCESS_KEY: ""
+        AWS_SESSION_TOKEN: ""
+      with:
+        node-version: "24"
+
+    - name: Install Fjall CLI
+      shell: bash
+      env:
+        CLI_VERSION: ${{ inputs.cli-version }}
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: |
+        # The install runs no package's lifecycle scripts: the CLI's dependency
+        # tree is resolved afresh on every install, and an install script is the
+        # usual way a compromised release reads the environment it runs in. In
+        # the trees the latest releases of fjall majors 10, 15, 20, 25 and 29
+        # to 39 resolve to (measured on macOS, 2026-10-08), the packages that
+        # declare one, esbuild (its binary-path optimisation) and fsevents
+        # (macOS only, prebuilt), work without it, provided npm installs
+        # optional dependencies, as it does by default: esbuild's binary is
+        # one. The deploy token the
+        # calling step's env hands every step of this action is taken out of
+        # this one, with the AWS keys a job may carry and the request token for
+        # GitHub's OIDC: only Run Fjall needs them.
+        unset FJALL_API_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
+        if [ "${CLI_VERSION}" = "latest" ]; then
+          npm install -g --ignore-scripts fjall
+        elif [ "${CLI_VERSION}" = "auto" ]; then
+          # Match the engine major to the app's pinned @fjall/components-infrastructure
+          # so the deploy engine never skews across a major from the constructs it
+          # synthesises (engine-version contract). github.action_path is GitHub-controlled;
+          # WORKING_DIRECTORY reaches the script via argv, never interpolated into the shell.
+          if ! RESOLVED_ENGINE_SPEC="$(node "${{ github.action_path }}/resolve-fjall-engine.mjs" "${WORKING_DIRECTORY}")"; then
+            echo "Failed to resolve the fjall engine from the app's @fjall/components-infrastructure pin" >&2
+            exit 1
+          fi
+          # An exit status is not an answer. The resolver prints one line and exits 0;
+          # a status-only check reads a silent success as a spec and hands the empty
+          # string to npm, which installs something nobody chose on the lane whose
+          # whole purpose is to pick the right major. Emptiness is its own refusal.
+          if [ -z "${RESOLVED_ENGINE_SPEC}" ]; then
+            echo "The fjall engine resolver exited 0 without naming an engine — refusing to install an unnamed one" >&2
+            exit 1
+          fi
+          npm install -g --ignore-scripts "${RESOLVED_ENGINE_SPEC}"
+        else
+          npm install -g --ignore-scripts "fjall@${CLI_VERSION}"
+        fi
+        echo "Installed $(fjall --version)"
+
+    - name: Run Fjall
+      id: run
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        argv_file: ${{ steps.inputs.outputs.argv-file }}
+      run: |
+        # The calling step's env hands this step the deploy token, so every
+        # process the script starts would hold it. It is taken out of the
+        # environment and handed to the CLI alone (run_cli), after an
+        # inherited xtrace, which would print that handover into the job log,
+        # is turned off; the braces keep that line's own trace out of the log.
+        { set +x; } 2>/dev/null
+        export -n FJALL_API_KEY
+        run_cli() {
+          if [ -n "${FJALL_API_KEY:-}" ]; then
+            FJALL_API_KEY="${FJALL_API_KEY}" fjall "$@"
+          else
+            fjall "$@"
+          fi
+        }
+
+        # The step's own variables have lower-case names, where a caller's
+        # are upper-case by convention, so each upper-case variable the
+        # calling step exports reaches the CLI as the caller set it.
+        args=()
+        while IFS= read -r -d '' arg; do
+          args+=("${arg}")
+        done < "${argv_file}"
+        rm -f "${argv_file}"
+
         # Run with timing; tee output so the approval token can be captured
-        LOG_FILE="$(mktemp)"
-        START=$(date +%s)
-        echo "::group::fjall ${ARGS[*]}"
-        echo "Running: fjall ${ARGS[*]}"
+        log_file="$(mktemp)"
+        start=$(date +%s)
+        echo "::group::fjall ${args[*]}"
+        echo "Running: fjall ${args[*]}"
 
         set +e
-        fjall "${ARGS[@]}" 2>&1 | tee "${LOG_FILE}"
-        EXIT_CODE=${PIPESTATUS[0]}
+        run_cli "${args[@]}" 2>&1 | tee "${log_file}"
+        exit_code=${PIPESTATUS[0]}
         set -e
 
         echo "::endgroup::"
 
-        END=$(date +%s)
-        echo "duration=$((END - START))" >> "${GITHUB_OUTPUT}"
+        end=$(date +%s)
+        echo "duration=$((end - start))" >> "${GITHUB_OUTPUT}"
 
         # The CLI prints "Approval token: <token>" when a plan has pending changes
-        TOKEN_LINE=$(grep -m1 '^Approval token: ' "${LOG_FILE}" || true)
-        rm -f "${LOG_FILE}"
-        if [ -n "${TOKEN_LINE}" ]; then
-          echo "approval-token=${TOKEN_LINE#Approval token: }" >> "${GITHUB_OUTPUT}"
+        token_line=$(grep -m1 '^Approval token: ' "${log_file}" || true)
+        rm -f "${log_file}"
+        if [ -n "${token_line}" ]; then
+          echo "approval-token=${token_line#Approval token: }" >> "${GITHUB_OUTPUT}"
         fi
 
-        # Exit 2 = plan computed with changes pending approval, or refused at the
-        # approval gate — no mutation happened. Propagate it so callers can gate.
-        if [ "${EXIT_CODE}" -eq 0 ]; then
+        # Exit 2 = the run stopped without failing: a plan with changes pending
+        # approval, a plan refused at the approval gate, or a run cancelled
+        # before it completed, which can stop after applying part of its
+        # change. Propagate it so callers can gate.
+        if [ "${exit_code}" -eq 0 ]; then
           echo "result=success" >> "${GITHUB_OUTPUT}"
-        elif [ "${EXIT_CODE}" -eq 2 ]; then
+        elif [ "${exit_code}" -eq 2 ]; then
           echo "result=plan-pending" >> "${GITHUB_OUTPUT}"
           exit 2
         else
           echo "result=failure" >> "${GITHUB_OUTPUT}"
-          exit "${EXIT_CODE}"
+          exit "${exit_code}"
         fi

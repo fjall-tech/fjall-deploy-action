@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: fjall-tech/fjall-deploy-action@v29
+      - uses: fjall-tech/fjall-deploy-action@v30
         with:
           target: my-app
           deploy-target: production-use1
@@ -47,6 +47,8 @@ Two credentials are involved: a Fjall deploy token (`FJALL_API_KEY`) and AWS cre
 The CLI authenticates to Fjall via `FJALL_API_KEY` — an app-scoped `fjall_dk_` deploy token used to record the deployment, hold the app's deploy slot, and read organisation config. A deploy token is minted only in a signed in browser session of an owner or admin. From a checkout of the repository, run `fjall ci token create --app <app> --target <target>` (CLI 40.0.0 or later). You approve its request in your own browser session, because only the person whose Fjall credential opened a request can approve it. Then the command stores the token as the `FJALL_API_KEY` repository secret itself, through `gh`. Or mint one on **Settings → CI/CD Tokens** in the [Fjall dashboard](https://fjall.io), the page whose URL `fjall ci setup` prints. Tokens expire after at most 90 days. To rotate, run the command again, or re-mint from the same page and update the secret.
 
 Store the token as a repository secret named `FJALL_API_KEY` (`gh secret set FJALL_API_KEY`) and pass it in the step's `env:` block as in the Quick Start. It takes precedence over any credentials stored on the runner (`~/.fjall/auth.json`).
+
+GitHub hands that env to every step of the action. Every step but Run Fjall takes the token and any AWS keys out of it: Check inputs and Setup Node.js blank them in their `env:`, and Install Fjall CLI unsets them before it installs the CLI, which runs no package's install scripts. Run Fjall takes the token out of its own environment too, and hands it to the `fjall` command alone. When the job grants `id-token: write`, the runner also sets GitHub's OIDC request token in every step, after the step's `env:`. Install Fjall CLI removes it, while Check inputs, which runs no command but `mktemp`, and Setup Node.js keep it. The runner also gives the commit-pinned `actions/setup-node` step its own runtime token.
 
 ### AWS Credentials
 
@@ -91,7 +93,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: fjall-tech/fjall-deploy-action@v29
+      - uses: fjall-tech/fjall-deploy-action@v30
         with:
           target: my-app
           deploy-target: production-use1
@@ -124,7 +126,7 @@ jobs:
           role-to-assume: arn:aws:iam::123456789012:role/deploy
           aws-region: us-east-1
 
-      - uses: fjall-tech/fjall-deploy-action@v29
+      - uses: fjall-tech/fjall-deploy-action@v30
         with:
           target: my-app
           deploy-target: production-use1
@@ -140,7 +142,7 @@ Pass long-lived keys as environment variables from GitHub Secrets. Least
 preferred — these do not expire on their own:
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v29
+- uses: fjall-tech/fjall-deploy-action@v30
   with:
     target: my-app
     deploy-target: production-use1
@@ -161,24 +163,37 @@ example) fails when they expire.
 | ------------------- | -------- | -------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `command`           | no       | `deploy` | —                  | `deploy`, `destroy`, or `build`                                                                                                                                                                                                                                                                                                                                |
 | `target`            | **yes**  | —        | all                | Application name, or a tier: `organisation`, `platform`, `account`. App targets run the app; tier targets route to the noun-verb tier command (`fjall org\|platform\|account deploy\|destroy`). `build` is app-only                                                                                                                                            |
-| `service`           | no       | —        | deploy, build      | One service, from fjall 40 by its whole name, ignoring case. Fjall 39 also selects every service whose name ends with it. A deploy narrows to it only with `mode: deploy-only` or `image-tag`. Fjall 40 refuses it on any other deploy, and fjall 39 leaves it unread                                                                                          |
+| `service`           | no       | `-`      | deploy, build      | One service, from fjall 40 by its whole name, ignoring case. Fjall 39 also selects every service whose name ends with it. A deploy narrows to it only with `mode: deploy-only` or `image-tag`. Fjall 40 refuses it on any other deploy, and fjall 39 leaves it unread                                                                                          |
 | `mode`              | no       | `full`   | deploy             | `full`, `infra-only`, or `deploy-only`                                                                                                                                                                                                                                                                                                                         |
-| `environment`       | no       | —        | deploy             | Target environment (maps to the `-e` flag)                                                                                                                                                                                                                                                                                                                     |
-| `deploy-target`     | no       | —        | app targets        | Deploy to a specific `fjall target list` target, e.g. `production-use1`; maps to `--target` (the credential where), distinct from `environment`                                                                                                                                                                                                                |
+| `environment`       | no       | `-`      | deploy             | Target environment (maps to the `-e` flag)                                                                                                                                                                                                                                                                                                                     |
+| `deploy-target`     | no       | `-`      | app targets        | Deploy to a specific `fjall target list` target, e.g. `production-use1`; maps to `--target` (the credential where), distinct from `environment`                                                                                                                                                                                                                |
 | `verbose`           | no       | `false`  | all                | Enable verbose output                                                                                                                                                                                                                                                                                                                                          |
 | `skip-build`        | no       | `false`  | deploy             | Skip a static-site or OpenNext build command when its output is already built; never skips a Docker build                                                                                                                                                                                                                                                      |
 | `no-cascade`        | no       | `false`  | org deploy/destroy | Skip the platform/account cascade around an `organisation` deploy or destroy (rejected for any other target)                                                                                                                                                                                                                                                   |
-| `region`            | no       | —        | deploy             | Deploy to a specific region within the target's account                                                                                                                                                                                                                                                                                                        |
-| `image-tag`         | no       | —        | deploy             | Roll forward/back to an existing image tag (skips build, implies `deploy-only`)                                                                                                                                                                                                                                                                                |
+| `region`            | no       | `-`      | deploy             | Deploy to a specific region within the target's account                                                                                                                                                                                                                                                                                                        |
+| `image-tag`         | no       | `-`      | deploy             | Roll forward/back to an existing image tag (skips build, implies `deploy-only`)                                                                                                                                                                                                                                                                                |
 | `plan`              | no       | `false`  | deploy             | Compute and print the change plan, then stop before any mutation; not with `mode: deploy-only` or `image-tag`, which change no template                                                                                                                                                                                                                        |
 | `require-approval`  | no       | `false`  | deploy             | Engage the approval gate: refuse to mutate unless approved via `auto-approve` or `approval-token`; not with `mode: deploy-only` or `image-tag`, which change no template                                                                                                                                                                                       |
 | `auto-approve`      | no       | `false`  | deploy             | Approve the computed plan without prompting (use with `require-approval`)                                                                                                                                                                                                                                                                                      |
-| `approval-token`    | no       | —        | deploy             | Resume an approved plan from a prior `plan` run (digest re-verified before applying); not with `mode: deploy-only` or `image-tag`, which change no template                                                                                                                                                                                                    |
-| `build-args`        | no       | —        | deploy, build      | Newline-separated `KEY=VALUE` pairs, each passed via `--build-arg`                                                                                                                                                                                                                                                                                             |
-| `build-secrets`     | no       | —        | deploy, build      | Newline-separated `id=ID,ssm=PATH` (or `secretsManager=NAME` \| `env=VAR`) tokens (`--build-secret`)                                                                                                                                                                                                                                                           |
+| `approval-token`    | no       | `-`      | deploy             | Resume an approved plan from a prior `plan` run (digest re-verified before applying); not with `mode: deploy-only` or `image-tag`, which change no template                                                                                                                                                                                                    |
+| `build-args`        | no       | `-`      | deploy, build      | Newline-separated `KEY=VALUE` pairs, each passed via `--build-arg`                                                                                                                                                                                                                                                                                             |
+| `build-secrets`     | no       | `-`      | deploy, build      | Newline-separated `id=ID,ssm=PATH` (or `secretsManager=NAME` \| `env=VAR`) tokens (`--build-secret`)                                                                                                                                                                                                                                                           |
 | `force`             | no       | `false`  | deploy, destroy    | Deploy: deploy every stack, including those with no detected changes (CloudFormation leaves an unchanged stack as it is). Destroy: bypass the busy-stack guard and destroy while the target's stacks are mid-operation. App destroys skip destruction confirmation in CI regardless; a tier destroy still needs force to pass its non-interactive confirmation |
 | `cli-version`       | no       | `39`     | —                  | Pin the published `fjall` CLI version. Defaults to this action's compatible major (floats across `39`.x, never crossing into the next major); `auto` derives the major from the app's pinned `@fjall/components-infrastructure`; `latest` always installs the newest published release                                                                         |
 | `working-directory` | no       | `.`      | —                  | Folder that holds the project's `fjall/` folder, relative to the repository's checkout. `fjall` runs there                                                                                                                                                                                                                                                     |
+
+Boolean inputs take `true` or `false`; leave one out for its default, `false`. Any other value stops the action at its first step, Check inputs, before Node or the CLI is installed, with an error naming the input: `'yes'`, `'True'`, `1`, `yes`, `no`, `on`, `off`, a padded value, or an expression that resolves to anything else.
+
+An input of any kind given an empty value stops the action the same way. The action cannot tell an expression that came out empty (`image-tag: ${{ env.ROLLBACK_TAG }}` with the variable unset) from a value left blank on purpose, and reading it as the input left out would turn that rollback into a build and deploy. Leave the input out, give it a value, or, for an input without a default of its own, pass `-`, which means none. Those inputs are `service`, `environment`, `deploy-target`, `region`, `image-tag`, `approval-token`, `build-args` and `build-secrets`, which default to it. Every other input refuses `-`, `cli-version` and `working-directory` included. Pass `approval-token` the plan's output as it is, never with a `|| '-'` ending: a plan cancelled before it finished leaves the output empty, and the empty value stops the apply step. Handed `-`, the step runs with no token and could deploy with no reviewed plan, unless it sets `require-approval: true` without `auto-approve: true`. To pass an optional value to any other of those inputs in one step, end the expression with `|| '-'`:
+
+```yaml
+- uses: fjall-tech/fjall-deploy-action@v30
+  with:
+    target: my-app
+    image-tag: ${{ inputs.image-tag || '-' }}
+```
+
+The same ending closes a conditional value: `${{ <condition> && '<value>' || '-' }}`.
 
 A plan and the approval gate cover a full or `infra-only` deploy. `mode: deploy-only` and `image-tag` change no template, so they have no plan, and a run of either with `plan`, `require-approval` or `approval-token` is refused before anything is deployed. Through CLI 39.0.8 such a run went ahead without either.
 
@@ -192,11 +207,11 @@ A plan and the approval gate cover a full or `infra-only` deploy. `mode: deploy-
 
 ## Exit Codes
 
-| Code | Meaning                                                                                    |
-| ---- | ------------------------------------------------------------------------------------------ |
-| `0`  | Success (for `plan`: no changes detected)                                                  |
-| `1`  | Error                                                                                      |
-| `2`  | Plan computed with changes pending approval, or refused at the approval gate — no mutation |
+| Code | Meaning                                                                                                                                                                                                                         |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | Success (for `plan`: no changes detected)                                                                                                                                                                                       |
+| `1`  | Error                                                                                                                                                                                                                           |
+| `2`  | Stopped without failing: a plan with changes pending approval, a plan refused at the approval gate, or a run cancelled before it completed, which can follow a partial change. `approval-token` is set only for pending changes |
 
 The action propagates exit code 2, so a `plan` step with pending changes fails the job unless you set `continue-on-error: true` and branch on the `result` output.
 
@@ -227,7 +242,7 @@ Keep `cancel-in-progress: false`: cancelling a deploy mid-run can interrupt an i
 Deploys infrastructure and application code:
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v29
+- uses: fjall-tech/fjall-deploy-action@v30
   with:
     target: my-app
 ```
@@ -237,7 +252,7 @@ Deploys infrastructure and application code:
 Deploy infrastructure changes without rebuilding/deploying the application:
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v29
+- uses: fjall-tech/fjall-deploy-action@v30
   with:
     target: my-app
     mode: infra-only
@@ -248,7 +263,7 @@ Deploy infrastructure changes without rebuilding/deploying the application:
 Deploy application code using existing infrastructure (faster for code-only changes). A code-only deploy builds and rolls only what the assembly a full deploy writes to `fjall/<app>/cdk.out` declares, so it needs that assembly in the job's checkout. A fresh runner has none, and there the deploy is refused (through CLI 39.0.8 it rolled nothing and exited 0; an app with capacity-identity pins was refused instead). On a fresh runner, use a full deploy, or `image-tag` for an image already built, which rolls the services the app's Compute stack exports with no assembly; an app with a container-image function in the roll needs the assembly for that too. Where a step earlier in the same job wrote the assembly, such as an `infra-only` deploy (Split Infrastructure and Code Deploys, below), the code-only step is:
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v29
+- uses: fjall-tech/fjall-deploy-action@v30
   with:
     target: my-app
     mode: deploy-only
@@ -261,7 +276,7 @@ Deploy application code using existing infrastructure (faster for code-only chan
 Compute the change plan on pull requests without mutating anything:
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v29
+- uses: fjall-tech/fjall-deploy-action@v30
   id: plan
   continue-on-error: true
   with:
@@ -273,10 +288,11 @@ Compute the change plan on pull requests without mutating anything:
   run: exit 1
 ```
 
-Then apply the approved plan (the token is digest-bound — the apply re-verifies that the plan has not drifted):
+Then apply the approved plan (the token is digest-bound — the apply re-verifies that the plan has not drifted). A plan with no changes prints no token, so run the apply only when changes are pending:
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v29
+- uses: fjall-tech/fjall-deploy-action@v30
+  if: steps.plan.outputs.result == 'plan-pending'
   with:
     target: my-app
     approval-token: ${{ steps.plan.outputs.approval-token }}
@@ -285,7 +301,7 @@ Then apply the approved plan (the token is digest-bound — the apply re-verifie
 Or approve in one shot in trusted pipelines:
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v29
+- uses: fjall-tech/fjall-deploy-action@v30
   with:
     target: my-app
     require-approval: true
@@ -295,7 +311,7 @@ Or approve in one shot in trusted pipelines:
 ### Roll Back to a Previous Image
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v29
+- uses: fjall-tech/fjall-deploy-action@v30
   with:
     target: my-app
     image-tag: "sha-4f9c2ab"
@@ -306,7 +322,7 @@ Find valid tags with `fjall releases my-app` (each release records the image tag
 ### Build-Time Args and Secrets
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v29
+- uses: fjall-tech/fjall-deploy-action@v30
   with:
     target: my-app
     build-args: |
@@ -319,7 +335,7 @@ Find valid tags with `fjall releases my-app` (each release records the image tag
 ### Destroy with Force
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v29
+- uses: fjall-tech/fjall-deploy-action@v30
   with:
     command: destroy
     target: my-app
@@ -331,7 +347,7 @@ Find valid tags with `fjall releases my-app` (each release records the image tag
 `service` narrows a code-only deploy, or an `image-tag` roll, to one service. From fjall 40 it selects the service by its whole name, ignoring case, so `service: worker` rolls `worker`, never `scan-worker`, and a name that matches no service is refused, listing the services there are. Fjall 39 also selects every service whose name ends with the name given, so with it `service: worker` rolls `scan-worker` too. A code-only deploy needs the assembly a full deploy wrote (Code Only, above):
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v29
+- uses: fjall-tech/fjall-deploy-action@v30
   with:
     target: my-app
     service: api
@@ -343,7 +359,7 @@ Find valid tags with `fjall releases my-app` (each release records the image tag
 A tier `target` routes to the noun-verb tier command. This runs `fjall org deploy --non-interactive --no-cascade` (the organisation root stack without its platform/account cascade):
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v29
+- uses: fjall-tech/fjall-deploy-action@v30
   with:
     target: organisation
     no-cascade: true
@@ -352,7 +368,7 @@ A tier `target` routes to the noun-verb tier command. This runs `fjall org deplo
 ### Pin CLI Version
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v29
+- uses: fjall-tech/fjall-deploy-action@v30
   with:
     target: my-app
     cli-version: "39.0.0"
@@ -372,11 +388,11 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::123456789012:role/deploy
           aws-region: us-east-2
-      - uses: fjall-tech/fjall-deploy-action@v29
+      - uses: fjall-tech/fjall-deploy-action@v30
         with:
           target: my-app
           mode: infra-only
-      - uses: fjall-tech/fjall-deploy-action@v29
+      - uses: fjall-tech/fjall-deploy-action@v30
         with:
           target: my-app
           mode: deploy-only
@@ -400,7 +416,7 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: us-east-2
-      - uses: fjall-tech/fjall-deploy-action@v29
+      - uses: fjall-tech/fjall-deploy-action@v30
         with:
           target: my-app
           environment: staging
@@ -415,7 +431,7 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: us-east-2
-      - uses: fjall-tech/fjall-deploy-action@v29
+      - uses: fjall-tech/fjall-deploy-action@v30
         with:
           target: my-app
           environment: production
@@ -427,16 +443,35 @@ The production job builds what it deploys. `skip-build` would not reuse what sta
 
 Two pins interact, and they move together:
 
-- **The action ref** — `fjall-tech/fjall-deploy-action@v29` is a moving major tag, repointed at the latest 29.x release on each republish; pin an exact tag (`@v29.0.0`) for maximum determinism.
+- **The action ref** — `fjall-tech/fjall-deploy-action@v30` is a moving major tag, repointed at the latest 30.x release on each republish; pin an exact tag (`@v30.0.0`) for maximum determinism.
 - **`cli-version`** — the `fjall` CLI the action installs per run; it defaults to the action major's compatible CLI major.
 
-Upgrade majors deliberately: a new action major defaults to a new CLI major, so bump the action ref and any explicit `cli-version` pin in the same change.
+Upgrade majors deliberately. A new action major either defaults to a new CLI major, or changes the action's own contract on the same CLI major, as v30 did: read its entry under [Breaking changes](#breaking-changes) before moving the ref, and when the CLI major changes, move any explicit `cli-version` pin in the same change.
+
+## Breaking changes
+
+### v30.0.0
+
+v30 is a new action major, so a workflow pinned to `@v29` keeps the old behaviour until its owner moves the pin. A workflow on `@main` runs the action's `main` branch, which moved to v30 when v30 was published and moves to v31 with the fjall 40 release. v30 installs the same CLI major as v29, 39; v31 carries these changes with the CLI 40 default.
+
+An input given an empty value, and a boolean that is not exactly `true` or `false`, now stops the action at its first step, Check inputs, before Node or the CLI is installed, with an error naming the input and never repeating the value. Before, an empty value read as the input left out, or worse (an empty `cli-version` installed the newest release of any major), and a boolean spelled any other way took the false arm: a step asked to plan deployed, an approval gate was dropped, an organisation deploy or destroy cascaded. An input left out takes its default as before, and `-` means none for every input without a default of its own.
+
+- **An empty value of any input:** an expression that came out empty (`${{ env.ROLLBACK_TAG }}` with the variable unset), or a value left blank on purpose, now stops the action. Leave the input out, give it a value, or, for an input without a default, end the expression with `|| '-'` (`image-tag: ${{ inputs.image-tag || '-' }}`), which also closes `<condition> && '<value>'`. Pass `approval-token` the plan's output as it is: with `|| '-'`, an apply after a cancelled plan runs with no token and could deploy with no reviewed plan, unless the step sets `require-approval: true` without `auto-approve: true`.
+- **A plan step's token handed to an apply step:** after a plan with no changes the `approval-token` output is empty, so the apply step now stops. Run the apply step only when the plan's `result` output is `plan-pending`, as the Plan Gate example does.
+- **A false not written as `false`:** quoted `'False'`, `'no'` or `'0'`; unquoted `0`, `no`, `off` or `n`; a padded value; or an expression that resolves to one of these. These read as false, and now stop the action. Write `false`, or leave the input out.
+- **A true not written as `true`:** quoted `'True'` or `'yes'`; unquoted `1`, `yes`, `on` or `y`. These ran the false arm before. Write `true`, and check what earlier runs did. Unquoted `True` and `TRUE` reach the action as `true`.
+- **`-`:** the inputs with no value of their own (`service`, `environment`, `deploy-target`, `region`, `image-tag`, `approval-token`, `build-args`, `build-secrets`) now declare `-` as their default in `action.yml`, in place of `""`, and read it as left out, as the Buildkite plugin does. Every other input refuses it in Check inputs, `cli-version` and `working-directory` included, which handed it to npm as a version and to the Run Fjall step as its directory.
+- **Caller variables in the CLI:** the CLI, and with it `infrastructure.ts` and the image build, saw an `INPUT_*` variable for each input but `cli-version` and `working-directory` (`INPUT_TARGET`, `INPUT_ENVIRONMENT` and the rest), holding the action's own value whether or not the calling step exported that name. It also saw the action's own value of `LOG_FILE`, `START` and `TIER_NOUN`, which Run Fjall set for itself before running the CLI, when the calling step exported the same name, and, when the step exported `ARGS`, no `ARGS` at all, nor on a tier target `INCOMPATIBLE`. It now sees each of those upper-case names as the calling step exported it, and no `INPUT_*` variable the step did not export: code that read one must read a variable the calling step sets in its own `env:` instead. Run Fjall's own names are now lower-case, so a calling step's variable that shares one it sets before running the CLI (`argv_file`, `arg`, `log_file` or `start`) reaches the CLI with the action's value, or, for `args`, not at all.
+- **The CLI install:** the CLI now installs with `--ignore-scripts`. On a runner whose npm configuration omits optional dependencies (`omit=optional`), esbuild's install script used to fetch its binary; now the CLI fails the first time it needs esbuild. Let npm install optional dependencies.
+- **Check inputs and setup-node:** validation runs in a new first step, Check inputs, and Setup Node.js now runs `actions/setup-node` v4.4.0, pinned by commit.
+
+Rollback: the workflow's owner pins the previous major, `v29`, which keeps the old behaviour.
 
 ## Caching
 
 The action restores no cache: it installs the CLI with `npm install -g` on every run, which on a GitHub-hosted runner downloads the whole CLI each time. What a restored cache holds decides what runs in a job that has `FJALL_API_KEY` and AWS credentials, and any workflow run on the default branch that a push, a schedule or a dispatch started can write an entry the deploy job would restore, with contents GitHub does not verify (GitHub's [dependency caching](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching) docs, read 2026-10-15).
 
-npm's own cache is no exception: npm checks a package against the integrity its metadata names, and reads that metadata from the same cache. Measured on npm 11.17.0 (2026-10-15), metadata and a tarball planted in npm's cache made `npm install -g` install a version the registry never published, and run its install script. With `--prefer-online`, npm asked the registry, which answered the ETags the planted entries carried with 304 Not Modified, and npm kept the planted copies. So put no npm cache into a job that runs this action: no `actions/cache` step over `~/.npm`, and on an `actions/setup-node` step no `cache` input and, from setup-node v5, `package-manager-cache: false`. A self-hosted runner that keeps its home directory between jobs keeps npm's cache too, and every workflow it runs can write it: a runner that runs untrusted workflows should not run deploys.
+npm's own cache is no exception: npm checks a package against the integrity its metadata names, and reads that metadata from the same cache. Measured on npm 11.17.0 (2026-10-15), metadata and a tarball planted in npm's cache made `npm install -g` install a version the registry never published, and run its install script. This action installs with `--ignore-scripts`, so no install script runs here, but the CLI a planted entry installs is the one Run Fjall then runs, holding the token. With `--prefer-online`, npm asked the registry, which answered the ETags the planted entries carried with 304 Not Modified, and npm kept the planted copies. So put no npm cache into a job that runs this action: no `actions/cache` step over `~/.npm`, and on an `actions/setup-node` step no `cache` input and, from setup-node v5, `package-manager-cache: false`. A self-hosted runner that keeps its home directory between jobs keeps npm's cache too, and every workflow it runs can write it: a runner that runs untrusted workflows should not run deploys.
 
 ## Troubleshooting
 
