@@ -73,7 +73,7 @@ inputs:
     required: false
     default: ""
   force:
-    description: "Deploy: redeploy all stacks even when no changes are detected. Destroy: bypass the busy-stack guard and destroy while the target's stacks are mid-operation. App destroys skip destruction confirmation in CI regardless; a tier destroy still needs force to pass its non-interactive confirmation"
+    description: "Deploy: deploy every stack, including those with no detected changes (CloudFormation leaves an unchanged stack as it is). Destroy: bypass the busy-stack guard and destroy while the target's stacks are mid-operation. App destroys skip destruction confirmation in CI regardless; a tier destroy still needs force to pass its non-interactive confirmation"
     required: false
     default: "false"
   cli-version:
