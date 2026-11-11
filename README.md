@@ -4,7 +4,7 @@ A GitHub Action to deploy, destroy, or build [Fjall](https://fjall.io) applicati
 
 This is a thin shim onto `fjall ci run` — it installs the CLI and delegates. The CLI owns command and flag validation, so an invalid combination (for example `mode` with `command: destroy`) fails with a directional error from `fjall` rather than being silently dropped.
 
-A tier `target` (`organisation`, `platform`, or `account`) routes to the noun-verb tier command — `fjall org deploy`, `fjall platform destroy`, and so on — and accepts only the flags that tier honours (`force`, `verbose`, and, for `organisation`, `no-cascade`). Any app or deploy-only property paired with a tier target is rejected at the plugin boundary rather than silently dropped.
+A tier `target` (`organisation`, `platform`, or `account`) runs the tier's own command, such as `fjall org deploy` or `fjall platform deploy`, and accepts only the flags that tier honours (`force`, `verbose`, and, for `organisation`, `no-cascade`). From fjall 39.0.12, an `account` or `platform` destroy is refused, because it destroyed every stack in the organisation, and from fjall 40 it removes only that tier's stack. Any app property, or one only a deploy reads, paired with a tier target is refused at the plugin boundary rather than silently dropped.
 
 ## Quick Start
 
@@ -59,13 +59,23 @@ The CLI resolves AWS credentials in a fixed order and **the first match wins**:
 
 Pick one path. With `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` in the
 step's environment the CLI uses them and never reaches the Fjall mint. With
-fjall 39, an application deploy then runs in whatever account they belong to,
-whatever target `deploy-target` or `environment` picks, and in `AWS_REGION`
-(else `AWS_DEFAULT_REGION`, else `us-east-2`) unless `region` is set. From
-fjall 40, the CLI first confirms they belong to that target's account and,
-when they do not, refuses the deploy before it records or changes anything,
-naming both accounts and the variables to unset; keys that belong to it deploy
-in the target's own region unless `region` is set. Running
+fjall 39, an application deploy or destroy then runs in whatever account they
+belong to, whatever target `deploy-target` or `environment` picks. A deploy runs
+in `AWS_REGION` (else `AWS_DEFAULT_REGION`, else `us-east-2`) unless `region` is
+set, and a destroy runs there even when it is. A tier step doesn't check the
+keys first either. An account deploy deploys in their account. It refuses only
+when that account is the one registered with Fjall as the organisation's
+management or platform account, or when Fjall's list of accounts can't be read.
+An organisation destroy records its start and reads AWS Organizations in their
+account, creating an organisation there if it has none, before it checks the
+account. An organisation deploy goes further before that check. It sets up the
+organisation in their account, creating member accounts and organisational
+units, and registers those accounts with Fjall. A platform deploy refuses keys
+for another account, but only after it has recorded its start. From fjall 40,
+the CLI first confirms they belong to the account the step acts on. If they
+don't, fjall 40 refuses the step before it records or changes anything, and
+names both accounts and the variables to unset. If they do, fjall 40 runs an
+application step in the target's own region unless `region` is set. Running
 `aws-actions/configure-aws-credentials` in a job meant to deploy through the
 Fjall mint is the usual way to get this wrong.
 
@@ -130,6 +140,8 @@ jobs:
         with:
           target: my-app
           deploy-target: production-use1
+        env:
+          FJALL_API_KEY: ${{ secrets.FJALL_API_KEY }}
 ```
 
 The CLI cannot renew a session it reads from the environment, so a deploy that
@@ -147,6 +159,7 @@ preferred — these do not expire on their own:
     target: my-app
     deploy-target: production-use1
   env:
+    FJALL_API_KEY: ${{ secrets.FJALL_API_KEY }}
     AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
     AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
     AWS_REGION: us-east-1
@@ -162,7 +175,7 @@ example) fails when they expire.
 | Input               | Required | Default  | Applies to         | Description                                                                                                                                                                                                                                                                                                                                                    |
 | ------------------- | -------- | -------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `command`           | no       | `deploy` | —                  | `deploy`, `destroy`, or `build`                                                                                                                                                                                                                                                                                                                                |
-| `target`            | **yes**  | —        | all                | Application name, or a tier: `organisation`, `platform`, `account`. App targets run the app; tier targets route to the noun-verb tier command (`fjall org\|platform\|account deploy\|destroy`). `build` is app-only                                                                                                                                            |
+| `target`            | **yes**  | —        | all                | Application name, or one of the tiers `organisation`, `platform` and `account`. App targets run the app, and tier targets run the tier's own command (`fjall org\|platform\|account deploy\|destroy`). From fjall 39.0.12 an `account` or `platform` destroy is refused, and from fjall 40 it removes only that tier's stack. `build` runs on app targets only |
 | `service`           | no       | `-`      | deploy, build      | One service, from fjall 40 by its whole name, ignoring case. Fjall 39 also selects every service whose name ends with it. A deploy narrows to it only with `mode: deploy-only` or `image-tag`. Fjall 40 refuses it on any other deploy, and fjall 39 leaves it unread                                                                                          |
 | `mode`              | no       | `full`   | deploy             | `full`, `infra-only`, or `deploy-only`                                                                                                                                                                                                                                                                                                                         |
 | `environment`       | no       | `-`      | deploy             | Target environment (maps to the `-e` flag)                                                                                                                                                                                                                                                                                                                     |
@@ -190,7 +203,10 @@ An input of any kind given an empty value stops the action the same way. The act
 - uses: fjall-tech/fjall-deploy-action@v30
   with:
     target: my-app
+    deploy-target: production-use1
     image-tag: ${{ inputs.image-tag || '-' }}
+  env:
+    FJALL_API_KEY: ${{ secrets.FJALL_API_KEY }}
 ```
 
 The same ending closes a conditional value: `${{ <condition> && '<value>' || '-' }}`.
@@ -245,6 +261,9 @@ Deploys infrastructure and application code:
 - uses: fjall-tech/fjall-deploy-action@v30
   with:
     target: my-app
+    deploy-target: production-use1
+  env:
+    FJALL_API_KEY: ${{ secrets.FJALL_API_KEY }}
 ```
 
 ### Infrastructure Only
@@ -255,7 +274,10 @@ Deploy infrastructure changes without rebuilding/deploying the application:
 - uses: fjall-tech/fjall-deploy-action@v30
   with:
     target: my-app
+    deploy-target: production-use1
     mode: infra-only
+  env:
+    FJALL_API_KEY: ${{ secrets.FJALL_API_KEY }}
 ```
 
 ### Code Only
@@ -266,7 +288,10 @@ Deploy application code using existing infrastructure (faster for code-only chan
 - uses: fjall-tech/fjall-deploy-action@v30
   with:
     target: my-app
+    deploy-target: production-use1
     mode: deploy-only
+  env:
+    FJALL_API_KEY: ${{ secrets.FJALL_API_KEY }}
 ```
 
 ## Examples
@@ -281,7 +306,10 @@ Compute the change plan on pull requests without mutating anything:
   continue-on-error: true
   with:
     target: my-app
+    deploy-target: production-use1
     plan: true
+  env:
+    FJALL_API_KEY: ${{ secrets.FJALL_API_KEY }}
 
 - name: Fail unless plan is clean
   if: steps.plan.outputs.result == 'failure'
@@ -295,7 +323,10 @@ Then apply the approved plan (the token is digest-bound — the apply re-verifie
   if: steps.plan.outputs.result == 'plan-pending'
   with:
     target: my-app
+    deploy-target: production-use1
     approval-token: ${{ steps.plan.outputs.approval-token }}
+  env:
+    FJALL_API_KEY: ${{ secrets.FJALL_API_KEY }}
 ```
 
 Or approve in one shot in trusted pipelines:
@@ -304,8 +335,11 @@ Or approve in one shot in trusted pipelines:
 - uses: fjall-tech/fjall-deploy-action@v30
   with:
     target: my-app
+    deploy-target: production-use1
     require-approval: true
     auto-approve: true
+  env:
+    FJALL_API_KEY: ${{ secrets.FJALL_API_KEY }}
 ```
 
 ### Roll Back to a Previous Image
@@ -314,7 +348,10 @@ Or approve in one shot in trusted pipelines:
 - uses: fjall-tech/fjall-deploy-action@v30
   with:
     target: my-app
+    deploy-target: production-use1
     image-tag: "sha-4f9c2ab"
+  env:
+    FJALL_API_KEY: ${{ secrets.FJALL_API_KEY }}
 ```
 
 Find valid tags with `fjall releases my-app` (each release records the image tags it shipped), from the original deploy's output, or from the app's ECR repository. An image-tag rollback re-pins application code only — it does not revert infrastructure changes or roll back database migrations.
@@ -325,11 +362,14 @@ Find valid tags with `fjall releases my-app` (each release records the image tag
 - uses: fjall-tech/fjall-deploy-action@v30
   with:
     target: my-app
+    deploy-target: production-use1
     build-args: |
       GIT_SHA=${{ github.sha }}
       PUBLIC_API_URL=https://api.example.com
     build-secrets: |
       id=npm-token,ssm=/ci/npm-token
+  env:
+    FJALL_API_KEY: ${{ secrets.FJALL_API_KEY }}
 ```
 
 ### Destroy with Force
@@ -339,7 +379,10 @@ Find valid tags with `fjall releases my-app` (each release records the image tag
   with:
     command: destroy
     target: my-app
+    deploy-target: production-use1
     force: true
+  env:
+    FJALL_API_KEY: ${{ secrets.FJALL_API_KEY }}
 ```
 
 ### Deploy Specific Service
@@ -350,8 +393,11 @@ Find valid tags with `fjall releases my-app` (each release records the image tag
 - uses: fjall-tech/fjall-deploy-action@v30
   with:
     target: my-app
+    deploy-target: production-use1
     service: api
     mode: deploy-only
+  env:
+    FJALL_API_KEY: ${{ secrets.FJALL_API_KEY }}
 ```
 
 ### Deploy a Tier
@@ -363,6 +409,8 @@ A tier `target` routes to the noun-verb tier command. This runs `fjall org deplo
   with:
     target: organisation
     no-cascade: true
+  env:
+    FJALL_API_KEY: ${{ secrets.FJALL_API_KEY }}
 ```
 
 ### Pin CLI Version
@@ -371,7 +419,10 @@ A tier `target` routes to the noun-verb tier command. This runs `fjall org deplo
 - uses: fjall-tech/fjall-deploy-action@v30
   with:
     target: my-app
+    deploy-target: production-use1
     cli-version: "39.0.0"
+  env:
+    FJALL_API_KEY: ${{ secrets.FJALL_API_KEY }}
 ```
 
 ### Split Infrastructure and Code Deploys
@@ -391,11 +442,17 @@ jobs:
       - uses: fjall-tech/fjall-deploy-action@v30
         with:
           target: my-app
+          deploy-target: production-use2
           mode: infra-only
+        env:
+          FJALL_API_KEY: ${{ secrets.FJALL_API_KEY }}
       - uses: fjall-tech/fjall-deploy-action@v30
         with:
           target: my-app
+          deploy-target: production-use2
           mode: deploy-only
+        env:
+          FJALL_API_KEY: ${{ secrets.FJALL_API_KEY }}
 ```
 
 ### Staging to Production Promotion
@@ -420,6 +477,8 @@ jobs:
         with:
           target: my-app
           environment: staging
+        env:
+          FJALL_API_KEY: ${{ secrets.FJALL_API_KEY }}
 
   production:
     needs: staging
@@ -435,6 +494,8 @@ jobs:
         with:
           target: my-app
           environment: production
+        env:
+          FJALL_API_KEY: ${{ secrets.FJALL_API_KEY }}
 ```
 
 The production job builds what it deploys. `skip-build` would not reuse what staging built: it skips only a static-site or OpenNext build command, never a Docker build.
