@@ -48,7 +48,7 @@ The CLI authenticates to Fjall via `FJALL_API_KEY` — an app-scoped `fjall_dk_`
 
 Store the token as a repository secret named `FJALL_API_KEY` (`gh secret set FJALL_API_KEY`) and pass it in the step's `env:` block as in the Quick Start. It takes precedence over any credentials stored on the runner (`~/.fjall/auth.json`).
 
-GitHub hands that env to every step of the action. Every step but Run Fjall takes the token and any AWS keys out of it: Check inputs and Setup Node.js blank them in their `env:`, and Install Fjall CLI unsets them before it installs the CLI, which runs no package's install scripts. Run Fjall takes the token out of its own environment too, and hands it to the `fjall` command alone. When the job grants `id-token: write`, the runner also sets GitHub's OIDC request token in every step, after the step's `env:`. Install Fjall CLI removes it, while Check inputs, which runs no command but `mktemp`, and Setup Node.js keep it. The runner also gives the commit-pinned `actions/setup-node` step its own runtime token.
+GitHub hands that env to every step of the action. Every step but Run Fjall takes the token and any AWS keys out of it. Check inputs, Setup Node.js and Summarise image builds blank them in their `env:`, and Install Fjall CLI unsets them before it installs the CLI, which runs no package's install scripts. Run Fjall takes the token out of its own environment too, and hands it to the `fjall` command alone. When the job grants `id-token: write`, the runner also sets GitHub's OIDC request token in every step, after the step's `env:`. Install Fjall CLI and Summarise image builds remove it, while Check inputs, which runs no command but `mktemp`, and Setup Node.js keep it. The runner also gives the commit-pinned `actions/setup-node` step its own runtime token.
 
 ### AWS Credentials
 
@@ -194,8 +194,9 @@ example) fails when they expire.
 | `force`             | no       | `false`  | deploy, destroy    | Deploy: deploy every stack, including those with no detected changes (CloudFormation leaves an unchanged stack as it is). Destroy: bypass the busy-stack guard and destroy while the target's stacks are mid-operation. App destroys skip destruction confirmation in CI regardless; a tier destroy still needs force to pass its non-interactive confirmation |
 | `cli-version`       | no       | `39`     | —                  | Pin the published `fjall` CLI version. Defaults to this action's compatible major (floats across `39`.x, never crossing into the next major); `auto` derives the major from the app's pinned `@fjall/components-infrastructure`; `latest` always installs the newest published release                                                                         |
 | `working-directory` | no       | `.`      | —                  | Folder that holds the project's `fjall/` folder, relative to the repository's checkout. `fjall` runs there                                                                                                                                                                                                                                                     |
+| `build-record`      | no       | `true`   | deploy, build      | Keep BuildKit's record of the run's image builds for a later step to upload. It holds every build arg value, each Dockerfile's whole source and each build step's log, unmasked, so read [Keeping the build record](#keeping-the-build-record) before you upload it. Needs buildx 0.23.0 or later. A destroy and a tier target keep no record                  |
 
-Boolean inputs take `true` or `false`; leave one out for its default, `false`. Any other value stops the action at its first step, Check inputs, before Node or the CLI is installed, with an error naming the input: `'yes'`, `'True'`, `1`, `yes`, `no`, `on`, `off`, a padded value, or an expression that resolves to anything else.
+Boolean inputs take `true` or `false`. Leave one out for its default, which is `false` for every one but `build-record`. Any other value stops the action at its first step, Check inputs, before Node or the CLI is installed, with an error naming the input: `'yes'`, `'True'`, `1`, `yes`, `no`, `on`, `off`, a padded value, or an expression that resolves to anything else.
 
 An input of any kind given an empty value stops the action the same way. The action cannot tell an expression that came out empty (`image-tag: ${{ env.ROLLBACK_TAG }}` with the variable unset) from a value left blank on purpose, and reading it as the input left out would turn that rollback into a build and deploy. Leave the input out, give it a value, or, for an input without a default of its own, pass `-`, which means none. Those inputs are `service`, `environment`, `deploy-target`, `region`, `image-tag`, `approval-token`, `build-args` and `build-secrets`, which default to it. Every other input refuses `-`, `cli-version` and `working-directory` included. Pass `approval-token` the plan's output as it is, never with a `|| '-'` ending: a plan cancelled before it finished leaves the output empty, and the empty value stops the apply step. Handed `-`, the step runs with no token and could deploy with no reviewed plan, unless it sets `require-approval: true` without `auto-approve: true`. To pass an optional value to any other of those inputs in one step, end the expression with `|| '-'`:
 
@@ -215,11 +216,12 @@ A plan and the approval gate cover a full or `infra-only` deploy. `mode: deploy-
 
 ## Outputs
 
-| Output           | Description                                                                                  |
-| ---------------- | -------------------------------------------------------------------------------------------- |
-| `result`         | `success`, `plan-pending` (exit code 2 — see below), or `failure`                            |
-| `duration`       | Command duration in seconds                                                                  |
-| `approval-token` | Token emitted by a `plan` run with pending changes; feed back via the `approval-token` input |
+| Output              | Description                                                                                                                  |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `result`            | `success`, `plan-pending` (exit code 2 — see below), or `failure`                                                            |
+| `duration`          | Command duration in seconds                                                                                                  |
+| `approval-token`    | Token emitted by a `plan` run with pending changes; feed back via the `approval-token` input                                 |
+| `build-record-path` | Path of the `.dockerbuild` record a run with `build-record: true` kept, for a later step to upload. Empty when none was kept |
 
 ## Exit Codes
 
@@ -238,6 +240,56 @@ The `result` output answers "did the step succeed". To confirm what actually shi
 - `fjall deployments list` — your organisation's active and recent deployments: who triggered each, from where, and its current state
 - `fjall releases <app>` — the app's recorded releases with their image tags: what is live now, and what a rollback can target
 - `fjall status <app>` — the deployed infrastructure's current health
+
+## Build summary
+
+After the `fjall` command ends, the action's last step, Summarise image builds, writes one table of the run's image builds to the job's summary page. It runs whether the command passed, failed or stopped at `plan-pending`. It reads the build history of Fjall's `fjall` builder rather than anything the CLI prints, so it works with fjall 39 and 40. It never changes the action's result or exit code, and it adds at most about 30 seconds. A destroy skips it, and a run that built no image, such as a tier deploy or an `image-tag` roll, writes no table. The table needs buildx 0.21.0 or later on the runner.
+
+Each row is one image, named `image 1`, `image 2` and so on in build order, with the platform it was built for in brackets, such as `image 1 (linux/arm64)`. The table shows the first 20 images and counts the rest. It names no service, Dockerfile, build stage or instruction, because those are text the app's authors wrote, and the action has no way to mask a secret inside them. Match a row to a service by build order, or by the CLI's log above it.
+
+| Column        | What it shows                                                                                                                                                                                                     |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Image         | `image N`, in build order, with the image's platform                                                                                                                                                              |
+| Built         | `native` when the image's platform is the runner's own, `emulated on <platform>` when the runner built it under QEMU on a host of the platform named, and `unknown` when the step couldn't tell                   |
+| Total         | The whole build, as BuildKit timed it. It ends `, failed` for a build that failed and `, cancelled` for one that stopped before it finished, and reads `running` for one still running when the step read it      |
+| Context       | Loading the build context, with how much was sent                                                                                                                                                                 |
+| Cache lookup  | Looking up the registry cache, with what the lookup found, which is `found`, `none found` (a first build, or a cache nobody has written yet), `refused`, `failed`, or `not finished` when the build stopped first |
+| Cache pull    | Pulling and unpacking the layers of the steps the cache answered                                                                                                                                                  |
+| Rebuilt steps | Running the steps the cache didn't answer                                                                                                                                                                         |
+| Cached        | The share of the Dockerfile's steps the cache answered, leaving out `FROM`, with a count of any step that failed or never finished                                                                                |
+| Image push    | Pushing the image to its repository                                                                                                                                                                               |
+| Cache export  | Writing the registry cache, with how many layers it wrote                                                                                                                                                         |
+
+Each phase is a window on BuildKit's clock, and BuildKit runs work in parallel, so the windows overlap and can add up to more than Total. Cache pull is an upper bound, because a cached step's window holds time it spent waiting as well as pulling.
+
+Under the table, each image lists its 3 slowest rebuilt steps of at least 1 second, and the first step the cache missed, which broke the cache for every step after it in its stage. A step reads `[n/m] KEYWORD`, such as `[4/9] RUN`, without its instruction, because BuildKit puts build arg values into a `RUN` step's name.
+
+Notes follow the steps. An image built for a platform other than the runner's own was built under emulation, and its note names the runner that builds it natively, `ubuntu-24.04-arm` for `linux/arm64` and `ubuntu-24.04` for `linux/amd64` (see [Runner Architecture](#runner-architecture)). Each image also gets a `docker buildx history logs --builder fjall <ref>` command, which prints that build's whole BuildKit log from a later step of the same job. The job log carries the same commands, and one line saying where the table went.
+
+### Keeping the build record
+
+By default, with buildx 0.23.0 or later, the step also exports BuildKit's record of the run's image builds to one `.dockerbuild` file on the runner, and the `build-record-path` output gives its path. Docker Desktop 4.31 or later opens the file in its Builds view, with each step's timing and log, through Import builds or `docker buildx history import --file <file>`. The action uploads nothing itself, so add an `actions/upload-artifact` step after it, as below. Its `if:` uploads the record after a failed deploy too, and skips the upload when no record was kept.
+
+```yaml
+- uses: fjall-tech/fjall-deploy-action@v30
+  id: deploy
+  with:
+    target: my-app
+    deploy-target: production-use1
+  env:
+    FJALL_API_KEY: ${{ secrets.FJALL_API_KEY }}
+
+- uses: actions/upload-artifact@v7
+  if: ${{ !cancelled() && steps.deploy.outputs.build-record-path != '' }}
+  with:
+    name: fjall-build-record
+    path: ${{ steps.deploy.outputs.build-record-path }}
+    retention-days: 7
+```
+
+`actions/upload-artifact` v6 and later run on Node 24 and need Actions Runner 2.327.1 or later. On an older self hosted runner use v4, and on GitHub Enterprise Server use the release the `actions/upload-artifact` README names for it, which was v3.2.2 on 12 November 2026.
+
+The record holds all of this unmasked. It holds every build arg value, in its `BuildArgs` and inside the names of `RUN` steps. It holds each Dockerfile's whole source, every instruction as written and as run, with the environment each `RUN` step saw, the image's configuration and each build step's log. It also names the absolute paths of the build context and the Dockerfile on the runner. Anyone with read access to the repository can download an uploaded artifact, and on a public repository that's anyone signed in to GitHub. So pass a secret through `build-secrets`, never `build-args`, keep `retention-days` short, and upload the record only where every reader may see what the builds used. Set `build-record: false` to keep no record at all. On a repository GitHub doesn't report as private, the step prints a warning when the record is on. A tier target and a destroy keep no record whatever `build-record` says, because neither builds an image.
 
 ## Serialising Deploys
 
@@ -556,6 +608,17 @@ Two different credentials can fail — the error tells you which:
 
 - **Fjall API errors** (401/403 from the Fjall API) mean `FJALL_API_KEY` is missing, expired, or revoked. Deploy tokens live at most 90 days. Run `fjall ci token create` again for a replacement, or mint one in the dashboard (**Settings → CI/CD Tokens**) and update the repository secret.
 - **AWS SDK errors** (`ExpiredToken`, `AccessDenied`, credential-chain failures naming AWS services) mean the workflow's AWS credentials are wrong — see [Authentication](#authentication).
+
+### Build summary missing or partial
+
+Summarise image builds prints one line in the job log for each thing that stopped it, naming the cause and the cure. The deploy's result never depends on it.
+
+- **buildx older than 0.21.0.** The step prints a line naming 0.21.0 and writes no table. Update Docker on a self hosted runner, or move the job to a GitHub hosted one.
+- **buildx older than 0.23.0, with `build-record` on, as it is by default.** The table still appears, and a line naming 0.23.0 says why no record was kept. Update buildx.
+- **No image build found.** A run that built no image, such as a tier deploy or an `image-tag` roll, writes no table. If the CLI's log shows a build, the Docker daemon's clock may run more than 5 seconds behind the runner's, which makes this run's builds look older than the run. Sync the clock of the daemon's host.
+- **Builds left out.** The step keeps a build only when its context is inside the repository's checkout, and the notes count the builds it left out. That leaves out a build another job ran on the same self hosted runner, and a build whose record names no context. Keep each image's build context inside the checkout.
+- **Images missing from the end of the table.** The step reads for at most 30 seconds, then shows what it read and counts the rest, and keeps no record when no time is left. Run `docker buildx history ls --builder fjall` in a later step of the same job to list every build.
+- **A line saying the build history couldn't be read.** buildx answered in a shape the step doesn't know, or `docker` isn't on the runner. The step's reading of buildx has been checked against buildx 0.37.2 only. Run `docker buildx history ls --builder fjall` in a later step to see what buildx answers, and update buildx.
 
 ## License
 

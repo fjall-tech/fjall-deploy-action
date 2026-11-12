@@ -88,6 +88,10 @@ inputs:
     description: "Folder that holds the project's fjall/ folder, relative to the repository's checkout. fjall runs there"
     required: false
     default: "."
+  build-record:
+    description: "Keep BuildKit's record of the run's image builds as one .dockerbuild file, whose path the `build-record-path` output gives a later step to upload. The action uploads nothing itself. The record holds every build arg value, in its `BuildArgs` and inside `RUN` step names, each Dockerfile's whole source and each build step's log, unmasked. On by default. Needs buildx 0.23.0 or later. A destroy and a tier target keep no record, since they build no image"
+    required: false
+    default: "true"
 
 outputs:
   result:
@@ -99,6 +103,9 @@ outputs:
   approval-token:
     description: "Approval token emitted by a plan run with pending changes; feed it back via the approval-token input to apply"
     value: ${{ steps.run.outputs.approval-token }}
+  build-record-path:
+    description: "Absolute path of the .dockerbuild record a run with `build-record: true` kept, for a later step to upload. Empty when no record was kept"
+    value: ${{ steps.build-summary.outputs.record-path }}
 
 runs:
   using: "composite"
@@ -109,8 +116,8 @@ runs:
     # the token to the CLI alone. When the job grants
     # `id-token: write`, the runner also sets GitHub's OIDC request token in
     # each step, after its env:, so only a script can take that out: the
-    # install step does, and Check inputs, which starts nothing but mktemp,
-    # and Setup Node.js keep it.
+    # install step and Summarise image builds do, and Check inputs, which
+    # starts nothing but mktemp, and Setup Node.js keep it.
     #
     # Every input is checked, and the fjall command composed from them, before
     # Node or the CLI is installed. The command reaches the Run Fjall step as
@@ -144,6 +151,7 @@ runs:
         INPUT_FORCE: ${{ inputs.force }}
         INPUT_CLI_VERSION: ${{ inputs.cli-version }}
         INPUT_WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        INPUT_BUILD_RECORD: ${{ inputs.build-record }}
       run: |
         # A refusal names the input and the rule, never the value: nothing has
         # shown what a refused value holds, and the job log keeps it. Keep in
@@ -156,10 +164,10 @@ runs:
 
         # A boolean input is exactly `true` or `false`, which is what GitHub
         # hands an action for a YAML `true` or `false`; an input left out
-        # takes action.yml's default, false. Anything else (`'yes'`, `1`,
-        # `'True'`, or an expression that came out empty) the reads below
-        # would take as false, which for plan, require-approval and
-        # no-cascade is the arm that changes more.
+        # takes action.yml's default, false for every one but build-record.
+        # Anything else (`'yes'`, `1`, `'True'`, or an expression that came
+        # out empty) the reads below would take as false, which for plan,
+        # require-approval and no-cascade is the arm that changes more.
         require_boolean() {
           case "$2" in
             true | false) ;;
@@ -174,6 +182,7 @@ runs:
         require_boolean require-approval "${INPUT_REQUIRE_APPROVAL}"
         require_boolean auto-approve "${INPUT_AUTO_APPROVE}"
         require_boolean force "${INPUT_FORCE}"
+        require_boolean build-record "${INPUT_BUILD_RECORD}"
 
         # A string input given an empty value is refused too, and for the
         # same cause: an input left out takes its default, so an empty one
@@ -261,6 +270,16 @@ runs:
           account) TIER_NOUN="account" ;;
           *) TIER_NOUN="" ;;
         esac
+
+        # A run keeps the build record only when it builds images. A destroy
+        # and a tier target build none, so they keep none whatever
+        # build-record says, rather than refuse it. It is on by default, and
+        # GitHub hands this step a value the workflow set and the default
+        # alike. Keep in lockstep with the Buildkite plugin's hooks/command.
+        KEEP_RECORD="false"
+        if [ "${INPUT_BUILD_RECORD}" = "true" ] && [ "${INPUT_COMMAND}" != "destroy" ] && [ -z "${TIER_NOUN}" ]; then
+          KEEP_RECORD="true"
+        fi
 
         if [ -n "${TIER_NOUN}" ]; then
           # Tier path. The tier leaves honour only --force, --verbose and
@@ -394,6 +413,7 @@ runs:
         ARGV_FILE="$(mktemp "${RUNNER_TEMP}/fjall-deploy-argv.XXXXXX")"
         printf '%s\0' "${ARGS[@]}" > "${ARGV_FILE}"
         echo "argv-file=${ARGV_FILE}" >> "${GITHUB_OUTPUT}"
+        echo "keep-record=${KEEP_RECORD}" >> "${GITHUB_OUTPUT}"
 
     # Pinned by commit: setup-node v4.4.0. The runner still hands a node
     # action its own runtime token, and the OIDC request token when the job
@@ -486,6 +506,9 @@ runs:
         # Run with timing; tee output so the approval token can be captured
         log_file="$(mktemp)"
         start=$(date +%s)
+        # Written before the CLI runs, so a failed or `plan-pending` run still
+        # hands Summarise image builds the time its builds started from.
+        echo "started=${start}" >> "${GITHUB_OUTPUT}"
         echo "::group::fjall ${args[*]}"
         echo "Running: fjall ${args[*]}"
 
@@ -519,3 +542,46 @@ runs:
           echo "result=failure" >> "${GITHUB_OUTPUT}"
           exit "${exit_code}"
         fi
+
+    # Reads the `fjall` builder's history of this run's image builds and
+    # writes one table, a row per image, to the step summary. It runs after a failed
+    # or `plan-pending` deploy too, and never changes the action's result.
+    # GitHub ignores its failure, the module's own status is dropped, and the
+    # script ends with exit 0. Every value reaches the script through env,
+    # and it needs no credential.
+    - name: Summarise image builds
+      id: build-summary
+      if: ${{ !cancelled() }}
+      continue-on-error: true
+      shell: bash
+      env:
+        FJALL_API_KEY: ""
+        AWS_ACCESS_KEY_ID: ""
+        AWS_SECRET_ACCESS_KEY: ""
+        AWS_SESSION_TOKEN: ""
+        INPUT_COMMAND: ${{ inputs.command }}
+        KEEP_RECORD: ${{ steps.inputs.outputs.keep-record }}
+        STARTED: ${{ steps.run.outputs.started }}
+        REPO_PRIVATE: ${{ github.event.repository.private }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        unset FJALL_API_KEY AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
+
+        # Run Fjall writes started before the CLI runs, so it is empty only
+        # when the deploy never started. A destroy builds no image.
+        if [ -z "${STARTED}" ] || [ "${INPUT_COMMAND}" = "destroy" ]; then
+          exit 0
+        fi
+
+        args=(--ci github --since "${STARTED}" --checkout "${GITHUB_WORKSPACE}"
+          --summary-out "${GITHUB_STEP_SUMMARY}" --outputs "${GITHUB_OUTPUT}")
+        if [ "${KEEP_RECORD}" = "true" ]; then
+          record_dir="${RUNNER_TEMP}/fjall-build-record"
+          mkdir -p "${record_dir}"
+          args+=(--record-dir "${record_dir}")
+          if [ "${REPO_PRIVATE}" != "true" ]; then
+            echo "::warning title=Fjall build record::GitHub does not report this repository as private. The build record stays on the runner unless a later step uploads it from the build-record-path output, and anyone who can read the repository can download what is uploaded. The record holds every build arg value, each Dockerfile's whole source and each build step's log, unmasked. Set build-record to false to keep no record."
+          fi
+        fi
+        node "${ACTION_PATH}/build-summary.mjs" "${args[@]}" || true
+        exit 0
