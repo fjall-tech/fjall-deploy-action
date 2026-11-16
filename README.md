@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: fjall-tech/fjall-deploy-action@v30
+      - uses: fjall-tech/fjall-deploy-action@v31
         with:
           target: my-app
           deploy-target: production-use1
@@ -103,7 +103,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: fjall-tech/fjall-deploy-action@v30
+      - uses: fjall-tech/fjall-deploy-action@v31
         with:
           target: my-app
           deploy-target: production-use1
@@ -136,7 +136,7 @@ jobs:
           role-to-assume: arn:aws:iam::123456789012:role/deploy
           aws-region: us-east-1
 
-      - uses: fjall-tech/fjall-deploy-action@v30
+      - uses: fjall-tech/fjall-deploy-action@v31
         with:
           target: my-app
           deploy-target: production-use1
@@ -154,7 +154,7 @@ Pass long-lived keys as environment variables from GitHub Secrets. Least
 preferred — these do not expire on their own:
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v30
+- uses: fjall-tech/fjall-deploy-action@v31
   with:
     target: my-app
     deploy-target: production-use1
@@ -192,7 +192,7 @@ example) fails when they expire.
 | `build-args`        | no       | `-`      | deploy, build      | Newline-separated `KEY=VALUE` pairs, each passed via `--build-arg`                                                                                                                                                                                                                                                                                             |
 | `build-secrets`     | no       | `-`      | deploy, build      | Newline-separated `id=ID,ssm=PATH` (or `secretsManager=NAME` \| `env=VAR`) tokens (`--build-secret`)                                                                                                                                                                                                                                                           |
 | `force`             | no       | `false`  | deploy, destroy    | Deploy: deploy every stack, including those with no detected changes (CloudFormation leaves an unchanged stack as it is). Destroy: bypass the busy-stack guard and destroy while the target's stacks are mid-operation. App destroys skip destruction confirmation in CI regardless; a tier destroy still needs force to pass its non-interactive confirmation |
-| `cli-version`       | no       | `39`     | —                  | Pin the published `fjall` CLI version. Defaults to this action's compatible major (floats across `39`.x, never crossing into the next major); `auto` derives the major from the app's pinned `@fjall/components-infrastructure`; `latest` always installs the newest published release                                                                         |
+| `cli-version`       | no       | `40`     | —                  | Pin the published `fjall` CLI version. Defaults to this action's compatible major (floats across `40`.x, never crossing into the next major); `auto` derives the major from the app's pinned `@fjall/components-infrastructure`; `latest` always installs the newest published release                                                                         |
 | `working-directory` | no       | `.`      | —                  | Folder that holds the project's `fjall/` folder, relative to the repository's checkout. `fjall` runs there                                                                                                                                                                                                                                                     |
 | `build-record`      | no       | `true`   | deploy, build      | Keep BuildKit's record of the run's image builds for a later step to upload. It holds every build arg value, each Dockerfile's whole source and each build step's log, unmasked, so read [Keeping the build record](#keeping-the-build-record) before you upload it. Needs buildx 0.23.0 or later. A destroy and a tier target keep no record                  |
 
@@ -201,7 +201,7 @@ Boolean inputs take `true` or `false`. Leave one out for its default, which is `
 An input of any kind given an empty value stops the action the same way. The action cannot tell an expression that came out empty (`image-tag: ${{ env.ROLLBACK_TAG }}` with the variable unset) from a value left blank on purpose, and reading it as the input left out would turn that rollback into a build and deploy. Leave the input out, give it a value, or, for an input without a default of its own, pass `-`, which means none. Those inputs are `service`, `environment`, `deploy-target`, `region`, `image-tag`, `approval-token`, `build-args` and `build-secrets`, which default to it. Every other input refuses `-`, `cli-version` and `working-directory` included. Pass `approval-token` the plan's output as it is, never with a `|| '-'` ending: a plan cancelled before it finished leaves the output empty, and the empty value stops the apply step. Handed `-`, the step runs with no token and could deploy with no reviewed plan, unless it sets `require-approval: true` without `auto-approve: true`. To pass an optional value to any other of those inputs in one step, end the expression with `|| '-'`:
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v30
+- uses: fjall-tech/fjall-deploy-action@v31
   with:
     target: my-app
     deploy-target: production-use1
@@ -273,7 +273,7 @@ Notes follow the steps. An image built for a platform other than the runner's ow
 By default, with buildx 0.23.0 or later, the step also exports BuildKit's record of the run's image builds to one `.dockerbuild` file on the runner, and the `build-record-path` output gives its path. Docker Desktop 4.31 or later opens the file in its Builds view, with each step's timing and log, through Import builds or `docker buildx history import --file <file>`. The action uploads nothing itself, so add an `actions/upload-artifact` step after it, as below. Its `if:` uploads the record after a failed deploy too, and skips the upload when no record was kept.
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v30
+- uses: fjall-tech/fjall-deploy-action@v31
   id: deploy
   with:
     target: my-app
@@ -312,7 +312,7 @@ Keep `cancel-in-progress: false`: cancelling a deploy mid-run can interrupt an i
 Deploys infrastructure and application code:
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v30
+- uses: fjall-tech/fjall-deploy-action@v31
   with:
     target: my-app
     deploy-target: production-use1
@@ -325,7 +325,7 @@ Deploys infrastructure and application code:
 Deploy infrastructure changes without rebuilding/deploying the application:
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v30
+- uses: fjall-tech/fjall-deploy-action@v31
   with:
     target: my-app
     deploy-target: production-use1
@@ -339,7 +339,7 @@ Deploy infrastructure changes without rebuilding/deploying the application:
 Deploy application code using existing infrastructure (faster for code-only changes). A code-only deploy builds and rolls only what the assembly a full deploy writes to `fjall/<app>/cdk.out` declares, so it needs that assembly in the job's checkout. A fresh runner has none, and there the deploy is refused (through CLI 39.0.8 it rolled nothing and exited 0; an app with capacity-identity pins was refused instead). On a fresh runner, use a full deploy, or `image-tag` for an image already built, which rolls the services the app's Compute stack exports with no assembly; an app with a container-image function in the roll needs the assembly for that too. Where a step earlier in the same job wrote the assembly, such as an `infra-only` deploy (Split Infrastructure and Code Deploys, below), the code-only step is:
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v30
+- uses: fjall-tech/fjall-deploy-action@v31
   with:
     target: my-app
     deploy-target: production-use1
@@ -355,7 +355,7 @@ Deploy application code using existing infrastructure (faster for code-only chan
 Compute the change plan on pull requests without mutating anything:
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v30
+- uses: fjall-tech/fjall-deploy-action@v31
   id: plan
   continue-on-error: true
   with:
@@ -373,7 +373,7 @@ Compute the change plan on pull requests without mutating anything:
 Then apply the approved plan (the token is digest-bound — the apply re-verifies that the plan has not drifted). A plan with no changes prints no token, so run the apply only when changes are pending:
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v30
+- uses: fjall-tech/fjall-deploy-action@v31
   if: steps.plan.outputs.result == 'plan-pending'
   with:
     target: my-app
@@ -386,7 +386,7 @@ Then apply the approved plan (the token is digest-bound — the apply re-verifie
 Or approve in one shot in trusted pipelines:
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v30
+- uses: fjall-tech/fjall-deploy-action@v31
   with:
     target: my-app
     deploy-target: production-use1
@@ -399,7 +399,7 @@ Or approve in one shot in trusted pipelines:
 ### Roll Back to a Previous Image
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v30
+- uses: fjall-tech/fjall-deploy-action@v31
   with:
     target: my-app
     deploy-target: production-use1
@@ -413,7 +413,7 @@ Find valid tags with `fjall releases my-app` (each release records the image tag
 ### Build-Time Args and Secrets
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v30
+- uses: fjall-tech/fjall-deploy-action@v31
   with:
     target: my-app
     deploy-target: production-use1
@@ -429,7 +429,7 @@ Find valid tags with `fjall releases my-app` (each release records the image tag
 ### Destroy with Force
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v30
+- uses: fjall-tech/fjall-deploy-action@v31
   with:
     command: destroy
     target: my-app
@@ -444,7 +444,7 @@ Find valid tags with `fjall releases my-app` (each release records the image tag
 `service` narrows a code-only deploy, or an `image-tag` roll, to one service. From fjall 40 it selects the service by its whole name, ignoring case, so `service: worker` rolls `worker`, never `scan-worker`, and a name that matches no service is refused, listing the services there are. Fjall 39 also selects every service whose name ends with the name given, so with it `service: worker` rolls `scan-worker` too. A code-only deploy needs the assembly a full deploy wrote (Code Only, above):
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v30
+- uses: fjall-tech/fjall-deploy-action@v31
   with:
     target: my-app
     deploy-target: production-use1
@@ -459,7 +459,7 @@ Find valid tags with `fjall releases my-app` (each release records the image tag
 A tier `target` routes to the noun-verb tier command. This runs `fjall org deploy --non-interactive --no-cascade` (the organisation root stack without its platform/account cascade):
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v30
+- uses: fjall-tech/fjall-deploy-action@v31
   with:
     target: organisation
     no-cascade: true
@@ -470,11 +470,11 @@ A tier `target` routes to the noun-verb tier command. This runs `fjall org deplo
 ### Pin CLI Version
 
 ```yaml
-- uses: fjall-tech/fjall-deploy-action@v30
+- uses: fjall-tech/fjall-deploy-action@v31
   with:
     target: my-app
     deploy-target: production-use1
-    cli-version: "39.0.0"
+    cli-version: "40.0.0"
   env:
     FJALL_API_KEY: ${{ secrets.FJALL_API_KEY }}
 ```
@@ -493,14 +493,14 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::123456789012:role/deploy
           aws-region: us-east-2
-      - uses: fjall-tech/fjall-deploy-action@v30
+      - uses: fjall-tech/fjall-deploy-action@v31
         with:
           target: my-app
           deploy-target: production-use2
           mode: infra-only
         env:
           FJALL_API_KEY: ${{ secrets.FJALL_API_KEY }}
-      - uses: fjall-tech/fjall-deploy-action@v30
+      - uses: fjall-tech/fjall-deploy-action@v31
         with:
           target: my-app
           deploy-target: production-use2
@@ -527,7 +527,7 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: us-east-2
-      - uses: fjall-tech/fjall-deploy-action@v30
+      - uses: fjall-tech/fjall-deploy-action@v31
         with:
           target: my-app
           environment: staging
@@ -544,7 +544,7 @@ jobs:
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: us-east-2
-      - uses: fjall-tech/fjall-deploy-action@v30
+      - uses: fjall-tech/fjall-deploy-action@v31
         with:
           target: my-app
           environment: production
@@ -558,7 +558,7 @@ The production job builds what it deploys. `skip-build` would not reuse what sta
 
 Two pins interact, and they move together:
 
-- **The action ref** — `fjall-tech/fjall-deploy-action@v30` is a moving major tag, repointed at the latest 30.x release on each republish; pin an exact tag (`@v30.0.0`) for maximum determinism.
+- **The action ref** — `fjall-tech/fjall-deploy-action@v31` is a moving major tag, repointed at the latest 31.x release on each republish; pin an exact tag (`@v31.0.0`) for maximum determinism.
 - **`cli-version`** — the `fjall` CLI the action installs per run; it defaults to the action major's compatible CLI major.
 
 Upgrade majors deliberately. A new action major either defaults to a new CLI major, or changes the action's own contract on the same CLI major, as v30 did: read its entry under [Breaking changes](#breaking-changes) before moving the ref, and when the CLI major changes, move any explicit `cli-version` pin in the same change.
