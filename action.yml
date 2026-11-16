@@ -95,7 +95,7 @@ inputs:
 
 outputs:
   result:
-    description: "Command result: success, plan-pending (exit code 2: the run stopped without failing, with changes pending approval, refused at the approval gate, or cancelled before it completed, which can follow a partial change; approval-token is set only for pending changes), or failure"
+    description: "Command result: success, plan-pending (exit code 2: the run stopped without failing, with changes pending approval, refused at the approval gate, or cancelled before it completed, which can follow a partial change; approval-token is set only for pending changes), or failure, which a cancelled run that ended on a failure the cancel didn't cause, such as a call AWS refused, also reports"
     value: ${{ steps.run.outputs.result }}
   duration:
     description: "Command duration in seconds"
@@ -532,7 +532,8 @@ runs:
         # Exit 2 = the run stopped without failing: a plan with changes pending
         # approval, a plan refused at the approval gate, or a run cancelled
         # before it completed, which can stop after applying part of its
-        # change. Propagate it so callers can gate.
+        # change. Propagate it so callers can gate. A cancelled run that ended
+        # on a failure the cancel didn't cause exits 1.
         if [ "${exit_code}" -eq 0 ]; then
           echo "result=success" >> "${GITHUB_OUTPUT}"
         elif [ "${exit_code}" -eq 2 ]; then

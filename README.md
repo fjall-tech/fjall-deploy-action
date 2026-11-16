@@ -233,6 +233,8 @@ A plan and the approval gate cover a full or `infra-only` deploy. `mode: deploy-
 
 The action propagates exit code 2, so a `plan` step with pending changes fails the job unless you set `continue-on-error: true` and branch on the `result` output.
 
+A cancelled run that ended on a failure the cancel didn't cause, such as a call AWS refused or a database a destroy left, sets `result` to `failure` and exits 1.
+
 ## Verifying a Deploy
 
 The `result` output answers "did the step succeed". To confirm what actually shipped, the CLI's read commands work anywhere the same `FJALL_API_KEY` is available (including a follow-up step):
