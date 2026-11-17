@@ -469,12 +469,14 @@ A tier `target` routes to the noun-verb tier command. This runs `fjall org deplo
 
 ### Pin CLI Version
 
+To pin an exact CLI release, put a version that `npm view fjall versions` lists in place of the placeholder.
+
 ```yaml
 - uses: fjall-tech/fjall-deploy-action@v31
   with:
     target: my-app
     deploy-target: production-use1
-    cli-version: "40.0.0"
+    cli-version: "<exact version>"
   env:
     FJALL_API_KEY: ${{ secrets.FJALL_API_KEY }}
 ```
