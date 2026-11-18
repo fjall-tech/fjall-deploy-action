@@ -184,7 +184,7 @@ example) fails when they expire.
 | `skip-build`        | no       | `false`  | deploy             | Skip a static-site or OpenNext build command when its output is already built; never skips a Docker build                                                                                                                                                                                                                                                      |
 | `no-cascade`        | no       | `false`  | org deploy/destroy | Skip the platform/account cascade around an `organisation` deploy or destroy (rejected for any other target)                                                                                                                                                                                                                                                   |
 | `region`            | no       | `-`      | deploy             | Deploy to a specific region within the target's account                                                                                                                                                                                                                                                                                                        |
-| `image-tag`         | no       | `-`      | deploy             | Roll forward/back to an existing image tag (skips build, implies `deploy-only`)                                                                                                                                                                                                                                                                                |
+| `image-tag`         | no       | `-`      | deploy             | Roll the app's services and container image functions to images already in the app's ECR repository, with no build and no template change. Takes precedence over `mode`                                                                                                                                                                                        |
 | `plan`              | no       | `false`  | deploy             | Compute and print the change plan, then stop before any mutation; not with `mode: deploy-only` or `image-tag`, which change no template                                                                                                                                                                                                                        |
 | `require-approval`  | no       | `false`  | deploy             | Engage the approval gate: refuse to mutate unless approved via `auto-approve` or `approval-token`; not with `mode: deploy-only` or `image-tag`, which change no template                                                                                                                                                                                       |
 | `auto-approve`      | no       | `false`  | deploy             | Approve the computed plan without prompting (use with `require-approval`)                                                                                                                                                                                                                                                                                      |
@@ -307,6 +307,18 @@ Keep `cancel-in-progress: false`: cancelling a deploy mid-run can interrupt an i
 
 ## Deploy Modes
 
+One action runs every kind of deploy, and its inputs choose which. Each row links to a worked example.
+
+| Deploy                                                   | Inputs                                               | What it does                                                                                                                               | On a fresh runner                                                                                                                              |
+| -------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Full](#full-deploy-default)                             | Leave `mode` out, or `mode: full`                    | Deploys the app's stacks, and builds and rolls the checkout's images                                                                       | Runs                                                                                                                                           |
+| [Infrastructure only](#infrastructure-only)              | `mode: infra-only`                                   | Deploys the app's stacks, and builds and rolls the checkout's images only when the Compute stack deploys                                   | Runs, unless a static site or OpenNext app has no built output                                                                                 |
+| [Code only](#code-only)                                  | `mode: deploy-only`                                  | Builds and rolls what the assembly in `fjall/<app>/cdk.out` declares, with no template change                                              | Refused, unless a step earlier in the job wrote the assembly ([Split Infrastructure and Code Deploys](#split-infrastructure-and-code-deploys)) |
+| [An image already built](#roll-back-to-a-previous-image) | `image-tag`                                          | Rolls the app's services and container image functions to images already in the app's ECR repository, with no build and no template change | Runs, unless the roll reaches a container image function, which needs the assembly                                                             |
+| [One service](#deploy-specific-service)                  | `service`, beside `image-tag` or `mode: deploy-only` | Narrows an `image-tag` roll or a code only deploy to that service                                                                          | As the row it narrows                                                                                                                          |
+
+Leave `mode` out when you set `image-tag`. The roll takes precedence over any `mode`, so `mode: infra-only` beside it deploys no infrastructure.
+
 ### Full Deploy (default)
 
 Deploys infrastructure and application code:
@@ -322,7 +334,7 @@ Deploys infrastructure and application code:
 
 ### Infrastructure Only
 
-Deploy infrastructure changes without rebuilding/deploying the application:
+Deploys the stacks that changed, or every stack with `force`, and builds and rolls the checkout's images only when the Compute stack is among them. It never runs a static site's or OpenNext build command. Where the checkout holds no built output, as on a fresh runner, it refuses such an app, so deploy that app in full.
 
 ```yaml
 - uses: fjall-tech/fjall-deploy-action@v31
@@ -398,12 +410,16 @@ Or approve in one shot in trusted pipelines:
 
 ### Roll Back to a Previous Image
 
+`image-tag` rolls the app's services and container image functions to images already built, with no build and no template change. Each rolls to its own image with the same tag ending, so `api-sha-4f9c2ab0d1e3` rolls a `worker` service to `worker-sha-4f9c2ab0d1e3`. Each of those images must already be in the app's ECR repository in the target account and region.
+
+The shared ending holds only where the services run the same image, because a tag's ending comes from its image's digest. Where they run different images, the roll is refused and no service rolls. Roll each service in a step of its own instead, with `service` and its own tag (Deploy Specific Service, below).
+
 ```yaml
 - uses: fjall-tech/fjall-deploy-action@v31
   with:
     target: my-app
     deploy-target: production-use1
-    image-tag: "sha-4f9c2ab"
+    image-tag: "api-sha-4f9c2ab0d1e3"
   env:
     FJALL_API_KEY: ${{ secrets.FJALL_API_KEY }}
 ```
@@ -441,7 +457,7 @@ Find valid tags with `fjall releases my-app` (each release records the image tag
 
 ### Deploy Specific Service
 
-`service` narrows a code-only deploy, or an `image-tag` roll, to one service. From fjall 40 it selects the service by its whole name, ignoring case, so `service: worker` rolls `worker`, never `scan-worker`, and a name that matches no service is refused, listing the services there are. Fjall 39 also selects every service whose name ends with the name given, so with it `service: worker` rolls `scan-worker` too. A code-only deploy needs the assembly a full deploy wrote (Code Only, above):
+`service` narrows an `image-tag` roll, or a code only deploy, to one service. From fjall 40 it selects the service by its whole name, ignoring case, so `service: worker` rolls `worker`, never `scan-worker`, and a name that matches no service is refused, listing the services there are. Fjall 39 also selects every service whose name ends with the name given, so with it `service: worker` rolls `scan-worker` too. A code only deploy needs the assembly a full deploy wrote (Code Only, above), so on a fresh runner roll an image already built.
 
 ```yaml
 - uses: fjall-tech/fjall-deploy-action@v31
@@ -449,7 +465,7 @@ Find valid tags with `fjall releases my-app` (each release records the image tag
     target: my-app
     deploy-target: production-use1
     service: api
-    mode: deploy-only
+    image-tag: "api-sha-4f9c2ab0d1e3"
   env:
     FJALL_API_KEY: ${{ secrets.FJALL_API_KEY }}
 ```
@@ -555,6 +571,8 @@ jobs:
 ```
 
 The production job builds what it deploys. `skip-build` would not reuse what staging built: it skips only a static-site or OpenNext build command, never a Docker build.
+
+A step that names only `environment` needs exactly one connected account on that stage. Where a stage has more, name the target with `deploy-target`, as `fjall target list` prints it.
 
 ## Versioning
 

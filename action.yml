@@ -49,7 +49,7 @@ inputs:
     required: false
     default: "-"
   image-tag:
-    description: "Roll forward/back to an existing image tag — skips build, implies deploy-only (deploy only)"
+    description: "Roll the app's services and container image functions to images already in the app's ECR repository, with no build and no template change. Takes precedence over mode (deploy only)"
     required: false
     default: "-"
   plan:
